@@ -17,7 +17,7 @@ macOS saves screenshots to the Desktop, so it fills up, and you must paste or dr
 - Keeps at most 5 tracked screenshots; a 6th moves the oldest to the Trash.
 - Moves each tracked screenshot to the Trash 5 minutes after it appeared.
 - Never touches a file you moved or renamed.
-- Menu bar list with time left per screenshot, a Copy action for each, Instant Copy, Start at Login, Open Screenshot Folder, Quit.
+- Menu bar list with time left per screenshot, a Copy action for each, Instant Copy, Start at Login, Open Screenshot Folder, Check for Updates, Quit.
 
 ## Install
 
@@ -28,6 +28,16 @@ open /Applications/SnapClip.app
 ```
 
 First run: macOS asks whether SnapClip may access your Desktop folder (or whichever folder holds your screenshots). Allow it, or screenshots cannot be detected.
+
+## Updating
+
+SnapClip checks GitHub for a newer release 5 seconds after launch and then every 24 hours. If one exists, the menu shows **Install Update X...** at the top.
+
+- **Check for Updates...** in the menu checks right away and tells you whether you are up to date.
+- **Install Update** runs `brew update` and `brew upgrade snapclip` (building from source takes about a minute), then relaunches the new version. Output goes to `~/Library/Logs/SnapClip/update.log`; if the update fails, the alert shows the end of that log.
+- If SnapClip was not installed by Homebrew (for example a build from source), **Install Update** opens the release page instead.
+
+To update by hand: `brew upgrade snapclip`.
 
 ## Why is there a delay?
 
