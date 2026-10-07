@@ -258,3 +258,128 @@ private func setScreenCaptureXattr(_ path: String) throws {
         #expect(settings.isThumbnailEnabled)
     }
 }
+
+@Suite struct UpdateTests {
+    private func release(tag: String, url: String = "https://github.com/0xnicholasy/snapclip/releases/tag/v0.1.2")
+        -> Data
+    {
+        Data(#"{"tag_name":"\#(tag)","html_url":"\#(url)","name":"ignored","draft":false}"#.utf8)
+    }
+
+    private func checker(current: String, response: Data) -> UpdateChecker {
+        UpdateChecker(currentVersion: current, fetch: { _ in response })
+    }
+
+    @Test func versionParseAcceptsPlainAndVPrefixed() throws {
+        let v1 = try #require(SemanticVersion("v0.1.2"))
+        let v2 = try #require(SemanticVersion("0.1.2"))
+        #expect(v1 == v2)
+        #expect(v1.description == "0.1.2")
+    }
+
+    @Test func versionParseRejectsAnythingElse() {
+        for bad in ["0.1", "v1.2.3-beta", "1.2.3.4", "garbage", "", "v", "1..3", "1.2.x", "V1.2.3", "+1.2.3"] {
+            #expect(SemanticVersion(bad) == nil, "\(bad) should be rejected")
+        }
+    }
+
+    @Test func versionCompareIsNumeric() throws {
+        let a = try #require(SemanticVersion("0.1.10"))
+        let b = try #require(SemanticVersion("0.1.9"))
+        #expect(a > b)
+        #expect(try #require(SemanticVersion("0.2.0")) > a)
+        #expect(try #require(SemanticVersion("1.0.0")) > a)
+    }
+
+    @Test func newerTagIsUpdateAvailable() async throws {
+        let result = try await checker(current: "0.1.1", response: release(tag: "v0.1.2")).check()
+        let expected = ReleaseInfo(
+            version: try #require(SemanticVersion("0.1.2")),
+            pageURL: try #require(URL(string: "https://github.com/0xnicholasy/snapclip/releases/tag/v0.1.2")))
+        #expect(result == .updateAvailable(expected))
+    }
+
+    @Test func releasePageURLIsBuiltFromVersionNotPayload() async throws {
+        let data = release(tag: "v0.3.4", url: "https://github.com/someone-else/other/releases/tag/v9.9.9")
+        let result = try await checker(current: "0.1.1", response: data).check()
+        guard case .updateAvailable(let info) = result else { Issue.record("expected update"); return }
+        #expect(info.pageURL.absoluteString == "https://github.com/0xnicholasy/snapclip/releases/tag/v0.3.4")
+    }
+
+    @Test func sameOrOlderTagIsUpToDate() async throws {
+        let same = try await checker(current: "0.1.2", response: release(tag: "v0.1.2")).check()
+        #expect(same == .upToDate(current: try #require(SemanticVersion("0.1.2"))))
+        let older = try await checker(current: "0.1.2", response: release(tag: "v0.1.1")).check()
+        #expect(older == .upToDate(current: try #require(SemanticVersion("0.1.2"))))
+    }
+
+    @Test func malformedJsonThrows() async {
+        let bad = checker(current: "0.1.1", response: Data("not json".utf8))
+        await #expect(throws: UpdateError.malformedResponse) { try await bad.check() }
+        let missing = checker(current: "0.1.1", response: Data(#"{"tag_name":"v0.1.2"}"#.utf8))
+        await #expect(throws: UpdateError.malformedResponse) { try await missing.check() }
+    }
+
+    @Test func unparsableTagOrNonGithubUrlThrows() async {
+        let beta = checker(current: "0.1.1", response: release(tag: "v0.2.0-beta"))
+        await #expect(throws: UpdateError.unrecognizedTag("v0.2.0-beta")) { try await beta.check() }
+        let evil = checker(current: "0.1.1", response: release(tag: "v0.2.0", url: "https://evil.example/x"))
+        await #expect(throws: UpdateError.malformedResponse) { try await evil.check() }
+    }
+
+    @Test func requestCarriesRequiredHeadersAndTimeout() throws {
+        let request = UpdateChecker(currentVersion: "0.1.2", fetch: { _ in Data() }).makeRequest()
+        #expect(request.url?.absoluteString == "https://api.github.com/repos/0xnicholasy/snapclip/releases/latest")
+        #expect(request.value(forHTTPHeaderField: "Accept") == "application/vnd.github+json")
+        #expect(request.value(forHTTPHeaderField: "User-Agent") == "SnapClip/0.1.2")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(request.timeoutInterval == 15)
+    }
+
+    @Test func nextCheckIsDelayedUntil24HoursAfterLast() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        #expect(UpdateSchedule.delayUntilNextCheck(lastCheck: nil, now: now) == 5)
+        #expect(UpdateSchedule.delayUntilNextCheck(lastCheck: now.addingTimeInterval(-3_600), now: now) == 82_800)
+        #expect(UpdateSchedule.delayUntilNextCheck(lastCheck: now.addingTimeInterval(-90_000), now: now) == 5)
+    }
+}
+
+@Suite struct HomebrewInstallTests {
+    @Test func derivesBrewPathFromCellarBundle() throws {
+        for prefix in ["/opt/homebrew", "/usr/local"] {
+            let install = try #require(
+                HomebrewInstall(bundlePath: "\(prefix)/Cellar/snapclip/0.1.1/SnapClip.app"))
+            #expect(install.brewPath == "\(prefix)/bin/brew")
+            #expect(install.stableAppPath == "\(prefix)/opt/snapclip/SnapClip.app")
+            #expect(install.environment["PATH"] == "\(prefix)/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+        }
+    }
+
+    @Test func nonCellarPathIsNotHomebrew() {
+        #expect(HomebrewInstall(bundlePath: "/Users/me/snapclip/build/SnapClip.app") == nil)
+        #expect(HomebrewInstall(bundlePath: "/Applications/SnapClip.app") == nil)
+        #expect(HomebrewInstall(bundlePath: "/opt/homebrew/Cellar/other/1.0/SnapClip.app") == nil)
+    }
+
+    @Test func nonAllowlistedOrEmptyPrefixIsRejected() {
+        #expect(HomebrewInstall(bundlePath: "/Cellar/snapclip/0.1.1/SnapClip.app") == nil)
+        #expect(HomebrewInstall(bundlePath: "/tmp/evil/Cellar/snapclip/0.1.1/SnapClip.app") == nil)
+        #expect(HomebrewInstall(bundlePath: "/Users/me/homebrew/Cellar/snapclip/0.1.1/SnapClip.app") == nil)
+        #expect(HomebrewInstall(bundlePath: "/usr/local/Cellar/snapclip/") == nil)
+        #expect(HomebrewInstall(bundlePath: "/usr/local/Cellar/snapclip/0.1.1/SnapClip.app") != nil)
+    }
+
+    @Test func environmentPassesThroughOnlyAllowlistedVariables() throws {
+        let install = try #require(HomebrewInstall(bundlePath: "/opt/homebrew/Cellar/snapclip/0.1.1/SnapClip.app"))
+        let env = install.environment(inheriting: [
+            "HTTPS_PROXY": "http://proxy:3128", "no_proxy": "localhost", "TMPDIR": "/tmp/x",
+            "PATH": "/evil", "DYLD_INSERT_LIBRARIES": "/evil.dylib", "HOMEBREW_NO_AUTO_UPDATE": "0",
+        ])
+        #expect(env["HTTPS_PROXY"] == "http://proxy:3128")
+        #expect(env["no_proxy"] == "localhost")
+        #expect(env["TMPDIR"] == "/tmp/x")
+        #expect(env["DYLD_INSERT_LIBRARIES"] == nil)
+        #expect(env["PATH"] == "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+        #expect(env["HOMEBREW_NO_AUTO_UPDATE"] == "1")
+    }
+}

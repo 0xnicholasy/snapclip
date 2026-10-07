@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var sweepTimer: Timer?
     private var watchedFolder = ScreenshotLocation.resolve()
     private var inFlight: Set<FileIdentity> = []
+    private let updates = UpdateController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -40,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         promptInstantCopyOnFirstLaunch()
+        updates.start()
     }
 
     private func promptInstantCopyOnFirstLaunch() {
@@ -132,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         store.sweep()
+        updates.addMenuItems(to: menu)
 
         let header = NSMenuItem(title: "Tracked screenshots", action: nil, keyEquivalent: "")
         header.isEnabled = false
@@ -188,6 +191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             title: "Open Screenshot Folder", action: #selector(openFolder), keyEquivalent: "")
         open.target = self
         menu.addItem(open)
+        menu.addItem(updates.makeCheckItem())
 
         menu.addItem(.separator())
         menu.addItem(
