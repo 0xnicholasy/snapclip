@@ -13,4 +13,5 @@ public enum SnapClipConstants {
     public static let bundleIdentifier = "io.github.0xnicholasy.snapclip"
     public static let screenCaptureXattr = "com.apple.metadata:kMDItemIsScreenCapture"
     public static let screenCaptureDomain = "com.apple.screencapture"
+    public static let windowManagerDomain = "com.apple.WindowManager"
 }

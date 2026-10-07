@@ -6,6 +6,9 @@ import SnapClipCore
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let store = TrackerStore()
     private let loginItem = LoginItem()
+    private let captureSettings = ScreenCaptureSettings()
+    private let desktopSettings = DesktopSettings()
+    private static let promptedKey = "didPromptInstantCopy"
     private var statusItem: NSStatusItem?
     private var watcher: FolderWatcher?
     private var sweepTimer: Timer?
@@ -34,6 +37,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             withTimeInterval: SnapClipConstants.sweepInterval, repeats: true
         ) { [weak self] _ in
             MainActor.assumeIsolated { _ = self?.store.sweep() }
+        }
+
+        promptInstantCopyOnFirstLaunch()
+    }
+
+    private func promptInstantCopyOnFirstLaunch() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: Self.promptedKey) else { return }
+        defaults.set(true, forKey: Self.promptedKey)
+        guard captureSettings.isThumbnailEnabled else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Copy screenshots instantly?"
+        alert.informativeText =
+            "While the floating thumbnail is shown, macOS waits about 10 seconds before saving the "
+            + "screenshot, so SnapClip can only copy it after that delay. Turning the thumbnail off "
+            + "copies each screenshot right away."
+        alert.addButton(withTitle: "Turn Off Thumbnail")
+        alert.addButton(withTitle: "Keep Thumbnail")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            captureSettings.setInstantCopy(true)
         }
     }
 
@@ -139,6 +164,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         login.state = loginItem.isEnabled ? .on : .off
         menu.addItem(login)
 
+        let instant = NSMenuItem(
+            title: "Instant Copy (no floating thumbnail)", action: #selector(toggleInstantCopy(_:)),
+            keyEquivalent: "")
+        instant.target = self
+        instant.state = captureSettings.isInstantCopyEnabled ? .on : .off
+        menu.addItem(instant)
+
+        if desktopSettings.iconsHidden {
+            menu.addItem(.separator())
+            let info = NSMenuItem(
+                title: "Desktop icons are hidden by macOS", action: nil, keyEquivalent: "")
+            info.isEnabled = false
+            menu.addItem(info)
+            let show = NSMenuItem(
+                title: "Show Desktop Icons...", action: #selector(openDesktopSettings), keyEquivalent: "")
+            show.target = self
+            menu.addItem(show)
+            menu.addItem(.separator())
+        }
+
         let open = NSMenuItem(
             title: "Open Screenshot Folder", action: #selector(openFolder), keyEquivalent: "")
         open.target = self
@@ -168,6 +213,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         } catch {
             NSLog("SnapClip: login item toggle failed: %@", String(describing: error))
+        }
+    }
+
+    @objc private func toggleInstantCopy(_ sender: NSMenuItem) {
+        captureSettings.setInstantCopy(!captureSettings.isInstantCopyEnabled)
+    }
+
+    @objc private func openDesktopSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Desktop-Settings.extension") {
+            NSWorkspace.shared.open(url)
         }
     }
 

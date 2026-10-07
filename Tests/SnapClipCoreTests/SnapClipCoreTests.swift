@@ -237,3 +237,24 @@ private func setScreenCaptureXattr(_ path: String) throws {
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 }
+
+@Suite struct ScreenCaptureSettingsTests {
+    @Test func instantCopyTogglesShowThumbnailKey() throws {
+        let suite = "snapclip-test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = ScreenCaptureSettings(defaults: defaults)
+
+        // macOS shows the thumbnail when the key is unset.
+        #expect(settings.isThumbnailEnabled)
+        #expect(!settings.isInstantCopyEnabled)
+
+        settings.setInstantCopy(true)
+        #expect(defaults.object(forKey: "show-thumbnail") as? Bool == false)
+        #expect(settings.isInstantCopyEnabled)
+
+        settings.setInstantCopy(false)
+        #expect(defaults.object(forKey: "show-thumbnail") as? Bool == true)
+        #expect(settings.isThumbnailEnabled)
+    }
+}
