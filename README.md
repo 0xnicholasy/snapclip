@@ -17,7 +17,7 @@ macOS saves screenshots to the Desktop, so it fills up, and you must paste or dr
 - Keeps at most 5 tracked screenshots; a 6th moves the oldest to the Trash.
 - Moves each tracked screenshot to the Trash 5 minutes after it appeared.
 - Never touches a file you moved or renamed.
-- Menu bar list with time left per screenshot, a Copy action for each, Start at Login, Open Screenshot Folder, Quit.
+- Menu bar list with time left per screenshot, a Copy action for each, Instant Copy, Start at Login, Open Screenshot Folder, Quit.
 
 ## Install
 
@@ -28,6 +28,16 @@ open /Applications/SnapClip.app
 ```
 
 First run: macOS asks whether SnapClip may access your Desktop folder (or whichever folder holds your screenshots). Allow it, or screenshots cannot be detected.
+
+## Why is there a delay?
+
+When macOS shows the floating screenshot thumbnail in the corner of the screen, it saves the file only after the thumbnail closes (about 10 seconds). SnapClip copies the file as soon as it exists, so the copy arrives late.
+
+Turn on **Instant Copy (no floating thumbnail)** in the SnapClip menu. This sets `show-thumbnail` to false in the `com.apple.screencapture` defaults domain, so macOS saves each screenshot immediately. Untick it to get the thumbnail back. On first launch SnapClip asks whether to turn the thumbnail off.
+
+## Desktop icons are hidden
+
+If macOS hides your Desktop icons (System Settings > Desktop & Dock > Show Items on Desktop), screenshots still land in the folder but you cannot see them on the Desktop. SnapClip shows "Desktop icons are hidden by macOS" in its menu with a "Show Desktop Icons..." shortcut to that settings pane. It never changes the setting itself.
 
 ## Build from source
 
