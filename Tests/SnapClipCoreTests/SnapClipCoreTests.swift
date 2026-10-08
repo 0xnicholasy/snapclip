@@ -444,10 +444,15 @@ private func setScreenCaptureXattr(_ path: String) throws {
         var gates: [CheckedContinuation<Void, Never>] = []
         var identityOverride: FileIdentity?
 
-        func openGates() async {
-            while gates.isEmpty { await Task.yield() }
-            for _ in 0..<10 { await Task.yield() }
-            gates.forEach { $0.resume() }
+        /// Waits (bounded) until `count` waits are suspended, then resumes every registered gate.
+        func openGates(expecting count: Int = 1) async throws {
+            var attempts = 0
+            while gates.count < count, attempts < 1_000 {
+                attempts += 1
+                await Task.yield()
+            }
+            defer { gates.forEach { $0.resume() } }
+            try #require(gates.count >= count, "expected \(count) suspended wait(s), saw \(gates.count)")
         }
     }
 
@@ -506,9 +511,9 @@ private func setScreenCaptureXattr(_ path: String) throws {
         let path = try screenshot(f, "shot.png")
         let first = pipeline.handle([created(path)])
         let second = pipeline.handle([created(path)])
-        #expect(first.count == 1)
-        #expect(second.isEmpty)
-        await probe.openGates()
+        try #require(first.count == 1)
+        try #require(second.isEmpty)
+        try await probe.openGates()
         for task in first + second { await task.value }
         #expect(probe.copies.count == 1)
     }
@@ -519,8 +524,9 @@ private func setScreenCaptureXattr(_ path: String) throws {
         let pipeline = makePipeline(f, probe, gated: true)
         let path = try screenshot(f, "shot.png")
         let tasks = pipeline.handle([created(path)])
+        try #require(tasks.count == 1)
         probe.identityOverride = FileIdentity(inode: 1, device: 1)
-        await probe.openGates()
+        try await probe.openGates()
         for task in tasks { await task.value }
         #expect(probe.copies.isEmpty)
         #expect(!f.store.isTracked(path: path))
