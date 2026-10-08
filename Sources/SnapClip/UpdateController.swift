@@ -223,14 +223,6 @@ final class UpdateController {
             presentFailure("Homebrew hasn't published SnapClip \(release.version) yet. Try again later.")
             return
         }
-        guard FileManager.default.fileExists(atPath: homebrew.stableAppPath) else {
-            let alert = NSAlert()
-            alert.messageText = "Update installed"
-            alert.informativeText = "Quit and reopen SnapClip."
-            alert.addButton(withTitle: "OK")
-            present(alert)
-            return
-        }
         relaunch(from: homebrew.stableAppPath)
     }
 
