@@ -2,7 +2,7 @@
 
 ultraplan: snapclip-hardening | branch: feat/snapclip-hardening | base: main | tag: pre-snapclip-hardening-main | created: 2026-10-08
 Status: ACTIVE
-Progress: 4/10 done
+Progress: 5/10 done
 
 ## Goal
 Close five gaps in SnapClip where failures are silent or past fixes have no regression test:
@@ -135,7 +135,7 @@ Required mitigations per workstream
 - verify: `swift build`; `swift test --filter PolicyTests`; `swift test --filter PersistenceTests`; mutation run (no-op `markSeen`); `swift test`; codex review (D2)
 
 ### T05 Mark a screenshot seen when it is renamed during the stability wait
-- status: todo
+- status: done (#PR, 2026-10-08)
 - needs: T03, T04
 - size: S
 - scope:
@@ -253,3 +253,4 @@ Required mitigations per workstream
 - 2026-10-08: T02 done. Unreadable tracked.json is logged and renamed to a tracked.json.unreadable-<timestamp> sidecar once before the first save; ENOENT silent, EPERM logged without rename. (#3)
 - 2026-10-08: T03 done. Screenshot event pipeline extracted to SnapClipCore.ScreenshotPipeline; copy-before-add, rescan flags, inFlight dedup and identity re-check now have guard-locking tests. (#4)
 - 2026-10-08: T04 done. TrackerStore.markSeen records an identity as seen (persisted, capped at maxSeen) without tracking it. (#5)
+- 2026-10-08: T05 done. A screenshot renamed during the stability wait is marked seen, so the renamed file is never tracked or trashed; timeout and copy failure still leave it retryable.
