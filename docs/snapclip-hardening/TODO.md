@@ -2,7 +2,7 @@
 
 ultraplan: snapclip-hardening | branch: feat/snapclip-hardening | base: main | tag: pre-snapclip-hardening-main | created: 2026-10-08
 Status: ACTIVE
-Progress: 5/10 done
+Progress: 6/10 done
 
 ## Goal
 Close five gaps in SnapClip where failures are silent or past fixes have no regression test:
@@ -155,7 +155,7 @@ Required mitigations per workstream
 - verify: `swift build`; `swift test --filter ScreenshotPipelineTests`; both mutation runs; `swift test`; `scripts/build-app.sh`, then the manual check above (Cmd+Shift+4 via System Events, real `defaults`); codex review (D2)
 
 ### T06 Delete the unreachable "Update installed" branch in finishUpgrade
-- status: todo
+- status: done (#7, 2026-10-08)
 - needs: none
 - size: S
 - scope:
@@ -256,3 +256,4 @@ Required mitigations per workstream
 - 2026-10-08: T03 done. Screenshot event pipeline extracted to SnapClipCore.ScreenshotPipeline; copy-before-add, rescan flags, inFlight dedup and identity re-check now have guard-locking tests. (#4)
 - 2026-10-08: T04 done. TrackerStore.markSeen records an identity as seen (persisted, capped at maxSeen) without tracking it. (#5)
 - 2026-10-08: T05 done. A screenshot renamed during the stability wait is marked seen, so the renamed file is never tracked or trashed; timeout and copy failure still leave it retryable. (#6)
+- 2026-10-08: T06 done. Removed the unreachable "Update installed" fileExists branch in finishUpgrade; the version check now leads straight to relaunch. (#7)
