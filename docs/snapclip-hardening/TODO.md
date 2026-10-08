@@ -2,7 +2,7 @@
 
 ultraplan: snapclip-hardening | branch: feat/snapclip-hardening | base: main | tag: pre-snapclip-hardening-main | created: 2026-10-08
 Status: ACTIVE
-Progress: 6/10 done
+Progress: 7/10 done
 
 ## Goal
 Close five gaps in SnapClip where failures are silent or past fixes have no regression test:
@@ -42,14 +42,14 @@ Required mitigations per workstream
 - D2: The `codex` subagent reviews each todo independently. No author may clear their own change. (owner, 2026-10-08)
 - D3: There is no CI. Verify locally with `swift build` and `swift test`, plus `scripts/build-app.sh` for any todo touching Sources/SnapClip/. (owner, 2026-10-08)
 - D4: Log forks to tasks/research/STATE.md. (owner)
-- D5: WS5 runs extraction before the signal change. T07 moves the runner into Core and adds tests for its current failure paths, still sending SIGTERM. T08 then adds SIGINT plus the grace period, so the new interrupt-order tests fail against the T07 runner. This reverses the spec's stage 2/3 order. (assumed, confirm by T07)
+- D5: WS5 runs extraction before the signal change. T07 moves the runner into Core and adds tests for its current failure paths, still sending SIGTERM. T08 then adds SIGINT plus the grace period, so the new interrupt-order tests fail against the T07 runner. This reverses the spec's stage 2/3 order. (confirmed by T07, 2026-10-08)
 - D6: The sidecar is named `tracked.json.unreadable-<yyyyMMdd'T'HHmmss'Z'>`, built from the store's injected `now()`. This is ISO 8601 basic format: it sorts correctly, has no colons, and two failures on the same day get different names. (confirmed by T02, 2026-10-08)
 - D7: `CocoaError.fileReadNoSuchFile` counts as ENOENT: no log, no flag. `CocoaError.fileReadNoPermission` counts as EPERM: log it, but do not set the flag. Any other read error, or a decode failure after both the State and legacy attempts, logs the error and sets the flag. (confirmed by T02, 2026-10-08)
 - D8: The runner lives in Sources/SnapClipCore/UpgradeRunner.swift.
   - It defines the protocols `UpgradeProcess` and `UpgradeProcessLauncher`.
   - `SystemUpgradeProcessLauncher` is the only code that creates a Foundation `Process`.
   - `isExecutable`, `timeout`, and `grace` are injected, so tests need no real executable and no real waits.
-  (assumed, confirm by T07)
+  (confirmed by T07, 2026-10-08)
 - D9: tasks/research/STATE.md does not exist at HEAD and nothing gitignores it. The first todo that logs a fork creates it and commits it alongside TODO.md; later todos append to it in their own PR. (assumed, confirm by T01)
 - D10: `ScreenshotPipeline.handle` returns the Tasks it spawns (`@discardableResult`), so tests can await them instead of sleeping. (confirmed by T03, 2026-10-08)
 
@@ -167,7 +167,7 @@ Required mitigations per workstream
 - verify: `swift build`; `swift test`; `scripts/build-app.sh`; the grep above; codex review (D2)
 
 ### T07 Move the Homebrew upgrade runner into SnapClipCore behind a fake-able process seam
-- status: todo
+- status: done (#8, 2026-10-08)
 - needs: T06
 - size: M
 - scope:
@@ -244,6 +244,8 @@ Required mitigations per workstream
 - No test covers markSeen's maxSeen cap or that markSeen on an unreadable store runs the sidecar rename before writing.
 - failedCopyIsNotTracked does not assert the identity stays out of seenIdentities after a copy failure.
 - No live run has hit the post-wait markSeen branch: renames at 0.2 ms and 250 ms after the file appeared both landed before SnapClip began its stability wait. A debug log line in that branch would let a live run confirm it.
+- The "Could not create <log>" failure is reachable only when the log directory already exists but is not writable. If the directory cannot be created, `createDirectory` throws first and the user sees the system error text instead.
+- Pre-existing upgrade-runner Lows from the T07 secreview: the watchdog can fire after waitUntilExit returns but before cancel, giving a false "Update timed out" (fold into T08); createFile then FileHandle(forWritingTo:) on update.log follows a symlink swapped in between; SystemProcess is @unchecked Sendable.
 
 ## Log
 - 2026-10-08: Plan created at HEAD c7705e0.
@@ -257,3 +259,4 @@ Required mitigations per workstream
 - 2026-10-08: T04 done. TrackerStore.markSeen records an identity as seen (persisted, capped at maxSeen) without tracking it. (#5)
 - 2026-10-08: T05 done. A screenshot renamed during the stability wait is marked seen, so the renamed file is never tracked or trashed; timeout and copy failure still leave it retryable. (#6)
 - 2026-10-08: T06 done. Removed the unreachable "Update installed" fileExists branch in finishUpgrade; the version check now leads straight to relaunch. (#7)
+- 2026-10-08: T07 done. The Homebrew upgrade runner moved into SnapClipCore.UpgradeRunner behind UpgradeProcess/UpgradeProcessLauncher; its five failure paths (brew missing, log not creatable, update fails, upgrade fails, timeout) have fake-launcher tests. Still SIGTERM on timeout. (#8)
