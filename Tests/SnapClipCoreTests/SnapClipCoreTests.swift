@@ -456,6 +456,119 @@ private func setScreenCaptureXattr(_ path: String) throws {
     }
 }
 
+@Suite struct UpgradeRunnerTests {
+    private final class FakeProcess: UpgradeProcess, @unchecked Sendable {
+        enum Behavior { case exits(Int32), hangsUntilTerminated }
+        private let behavior: Behavior
+        private let lock = NSLock()
+        private let exited = DispatchSemaphore(value: 0)
+        private var status: Int32 = 0
+        private var terminateCount = 0
+        init(_ behavior: Behavior) { self.behavior = behavior }
+
+        var terminations: Int { lock.withLock { terminateCount } }
+        var isRunning: Bool { false }
+        var terminationStatus: Int32 { lock.withLock { status } }
+        func run() throws {}
+        func interrupt() {}
+        func waitUntilExit() {
+            switch behavior {
+            case .exits(let code): lock.withLock { status = code }
+            case .hangsUntilTerminated: exited.wait()
+            }
+        }
+        func terminate() {
+            lock.withLock { terminateCount += 1; status = 15 }
+            exited.signal()
+        }
+    }
+
+    private final class FakeLauncher: UpgradeProcessLauncher, @unchecked Sendable {
+        private let lock = NSLock()
+        private var behaviors: [FakeProcess.Behavior]
+        private var launchedArguments: [[String]] = []
+        private var launchedProcesses: [FakeProcess] = []
+        init(_ behaviors: [FakeProcess.Behavior]) { self.behaviors = behaviors }
+
+        var launches: [[String]] { lock.withLock { launchedArguments } }
+        var processes: [FakeProcess] { lock.withLock { launchedProcesses } }
+
+        func makeProcess(
+            executable: URL, arguments: [String], environment: [String: String], log: FileHandle
+        ) -> UpgradeProcess {
+            lock.withLock {
+                let process = FakeProcess(behaviors.isEmpty ? .exits(0) : behaviors.removeFirst())
+                launchedArguments.append(arguments)
+                launchedProcesses.append(process)
+                return process
+            }
+        }
+    }
+
+    private func install() throws -> HomebrewInstall {
+        try #require(HomebrewInstall(bundlePath: "/opt/homebrew/Cellar/snapclip/0.1.1/SnapClip.app"))
+    }
+
+    private func tempDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("snapclip-upgrade-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test func missingBrewFailsBeforeLaunching() throws {
+        let dir = try tempDir()
+        let launcher = FakeLauncher([])
+        let outcome = UpgradeRunner.run(
+            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 5,
+            launcher: launcher, isExecutable: { _ in false })
+        #expect(outcome == .failed("Homebrew was not found at /opt/homebrew/bin/brew"))
+        #expect(launcher.launches.isEmpty)
+    }
+
+    @Test func unwritableLogDirectoryFailsBeforeLaunching() throws {
+        let dir = try tempDir()
+        let logURL = dir.appendingPathComponent("update.log")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path) }
+        let launcher = FakeLauncher([])
+        let outcome = UpgradeRunner.run(
+            try install(), logURL: logURL, timeout: 5, launcher: launcher, isExecutable: { _ in true })
+        #expect(outcome == .failed("Could not create \(logURL.path)"))
+        #expect(launcher.launches.isEmpty)
+    }
+
+    @Test func failedUpdateSkipsUpgrade() throws {
+        let dir = try tempDir()
+        let launcher = FakeLauncher([.exits(1)])
+        let outcome = UpgradeRunner.run(
+            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 5,
+            launcher: launcher, isExecutable: { _ in true })
+        #expect(outcome == .failed("brew update exited with status 1"))
+        #expect(launcher.launches == [["update", "--quiet"]])
+    }
+
+    @Test func failedUpgradeReportsItsStatus() throws {
+        let dir = try tempDir()
+        let launcher = FakeLauncher([.exits(0), .exits(1)])
+        let outcome = UpgradeRunner.run(
+            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 5,
+            launcher: launcher, isExecutable: { _ in true })
+        #expect(outcome == .failed("brew upgrade exited with status 1"))
+        #expect(launcher.launches == [["update", "--quiet"], ["upgrade", "snapclip"]])
+    }
+
+    @Test func hungBrewIsTerminatedAfterTimeout() throws {
+        let dir = try tempDir()
+        let launcher = FakeLauncher([.hangsUntilTerminated])
+        let outcome = UpgradeRunner.run(
+            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 0.05,
+            launcher: launcher, isExecutable: { _ in true })
+        #expect(outcome == .failed("Update timed out"))
+        #expect(launcher.processes.first?.terminations == 1)
+    }
+}
+
 @MainActor
 @Suite struct ScreenshotPipelineTests {
     @MainActor private final class Probe {
