@@ -96,8 +96,14 @@ public final class ScreenshotPipeline {
         return Task { @MainActor in
             let stable = await waitUntilStable(path)
             inFlight.remove(identity)
-            guard stable, identityOf(path) == identity, copy(url)
-            else { return }
+            // Renamed or replaced during the wait: remember the original file so it is not
+            // tracked (and later trashed) under its new name. Never on a timeout with unchanged
+            // identity or on copy failure.
+            if identityOf(path) != identity {
+                store.markSeen(identity)
+                return
+            }
+            guard stable, copy(url) else { return }
             store.add(path: path)
         }
     }

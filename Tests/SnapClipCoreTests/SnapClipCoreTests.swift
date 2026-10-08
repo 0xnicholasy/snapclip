@@ -464,6 +464,9 @@ private func setScreenCaptureXattr(_ path: String) throws {
         var copyResult = true
         var gates: [CheckedContinuation<Void, Never>] = []
         var identityOverride: FileIdentity?
+        var stable = true
+        /// Runs inside the injected wait, after the pipeline has started waiting.
+        var onWait: (@MainActor () -> Void)?
 
         /// Waits (bounded) until `count` waits are suspended, then resumes every registered gate.
         func openGates(expecting count: Int = 1) async throws {
@@ -483,8 +486,9 @@ private func setScreenCaptureXattr(_ path: String) throws {
         ScreenshotPipeline(
             store: f.store, watchedFolder: f.dir,
             waitUntilStable: { _ in
+                probe.onWait?()
                 if gated { await withCheckedContinuation { probe.gates.append($0) } }
-                return true
+                return probe.stable
             },
             copy: { probe.copies.append($0); return probe.copyResult },
             listFolder: { probe.listed.append($0); return names },
@@ -544,12 +548,74 @@ private func setScreenCaptureXattr(_ path: String) throws {
         let probe = Probe()
         let pipeline = makePipeline(f, probe, gated: true)
         let path = try screenshot(f, "shot.png")
+        let original = try #require(FileIdentity.at(path: path))
+        probe.onWait = { probe.identityOverride = FileIdentity(inode: 1, device: 1) }
         let tasks = pipeline.handle([created(path)])
         try #require(tasks.count == 1)
-        probe.identityOverride = FileIdentity(inode: 1, device: 1)
         try await probe.openGates()
         for task in tasks { await task.value }
         #expect(probe.copies.isEmpty)
         #expect(!f.store.isTracked(path: path))
+        #expect(f.store.seenIdentities.contains(original))
+    }
+
+    @Test func renameDuringWaitMarksSeenAndLaterEventIsIgnored() async throws {
+        let f = try Fixture()
+        let probe = Probe()
+        let pipeline = makePipeline(f, probe, gated: true)
+        let path = try screenshot(f, "shot.png")
+        let original = try #require(FileIdentity.at(path: path))
+        let renamed = f.dir.appendingPathComponent("renamed.png").path
+        probe.onWait = { try? FileManager.default.moveItem(atPath: path, toPath: renamed) }
+        let tasks = pipeline.handle([created(path)])
+        try #require(tasks.count == 1)
+        try await probe.openGates()
+        for task in tasks { await task.value }
+        #expect(probe.copies.isEmpty)
+        #expect(!f.store.isTracked(path: path))
+        #expect(!f.store.isTracked(path: renamed))
+        #expect(f.store.seenIdentities.contains(original))
+        probe.onWait = nil
+        probe.gates.removeAll()
+        let later = pipeline.handle([created(renamed)])
+        #expect(later.isEmpty)
+        if !later.isEmpty { try await probe.openGates() }
+        for task in later { await task.value }
+        #expect(probe.copies.isEmpty)
+        #expect(!f.store.isTracked(path: renamed))
+    }
+
+    @Test func timeoutDoesNotMarkSeenAndRetryCopies() async throws {
+        let f = try Fixture()
+        let probe = Probe()
+        var waits = 0
+        let pipeline = ScreenshotPipeline(
+            store: f.store, watchedFolder: f.dir,
+            waitUntilStable: { _ in waits += 1; return waits > 1 },
+            copy: { probe.copies.append($0); return true })
+        let path = try screenshot(f, "shot.png")
+        let original = try #require(FileIdentity.at(path: path))
+        for task in pipeline.handle([created(path)]) { await task.value }
+        #expect(probe.copies.isEmpty)
+        #expect(!f.store.seenIdentities.contains(original))
+        for task in pipeline.handle([created(path)]) { await task.value }
+        #expect(probe.copies.count == 1)
+        #expect(f.store.isTracked(path: path))
+    }
+
+    @Test func timeoutWithRenameStillMarksSeen() async throws {
+        let f = try Fixture()
+        let probe = Probe()
+        probe.stable = false
+        let pipeline = makePipeline(f, probe)
+        let path = try screenshot(f, "shot.png")
+        let original = try #require(FileIdentity.at(path: path))
+        let renamed = f.dir.appendingPathComponent("renamed.png").path
+        probe.onWait = { try? FileManager.default.moveItem(atPath: path, toPath: renamed) }
+        for task in pipeline.handle([created(path)]) { await task.value }
+        #expect(probe.copies.isEmpty)
+        #expect(!f.store.isTracked(path: path))
+        #expect(!f.store.isTracked(path: renamed))
+        #expect(f.store.seenIdentities.contains(original))
     }
 }
