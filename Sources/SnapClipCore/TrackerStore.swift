@@ -29,6 +29,8 @@ public final class TrackerStore {
     public private(set) var items: [TrackedScreenshot]
     public private(set) var seen: [FileIdentity]
     private var dirty = false
+    /// Set when the store file existed but could not be used; the next save moves it aside first.
+    private(set) var loadFailed = false
     private let storeURL: URL
     private let now: () -> Date
     private let trash: Trash
@@ -53,9 +55,10 @@ public final class TrackerStore {
         self.now = now
         self.trash = trash
         self.identityOf = identityOf
-        let state = Self.load(from: storeURL)
-        self.items = state.items
-        self.seen = state.seen
+        let loaded = Self.load(from: storeURL)
+        self.items = loaded.state.items
+        self.seen = loaded.state.seen
+        self.loadFailed = loaded.unusable
     }
 
     /// Identities of every file ever tracked (bounded). A seen file is never tracked again,
@@ -119,20 +122,57 @@ public final class TrackerStore {
         }
     }
 
-    private static func load(from url: URL) -> State {
+    /// `unusable` is true when the file exists but could not be read or decoded, so the caller
+    /// can preserve it before overwriting. A missing file or a permission error is not flagged:
+    /// the first is normal, and the second skips the rename on purpose (constraint WS2); whether
+    /// saves should be blocked in that case is an open backlog decision.
+    private static func load(from url: URL) -> (state: State, unusable: Bool) {
         let empty = State(items: [], seen: [])
-        guard let data = try? Data(contentsOf: url) else { return empty }
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            switch (error as? CocoaError)?.code {
+            case .fileReadNoSuchFile:
+                return (empty, false)
+            case .fileReadNoPermission:
+                NSLog("SnapClip: no permission to read %@: %@", url.path, String(describing: error))
+                return (empty, false)
+            default:
+                NSLog("SnapClip: could not read %@: %@", url.path, String(describing: error))
+                return (empty, true)
+            }
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        if let state = try? decoder.decode(State.self, from: data) { return state }
+        let stateError: Error
+        do {
+            return (try decoder.decode(State.self, from: data), false)
+        } catch {
+            stateError = error
+        }
         // Older versions stored a bare array of tracked items.
         if let legacy = try? decoder.decode([TrackedScreenshot].self, from: data) {
-            return State(items: legacy, seen: legacy.map(\.identity))
+            return (State(items: legacy, seen: legacy.map(\.identity)), false)
         }
-        return empty
+        NSLog("SnapClip: could not decode %@: %@", url.path, String(describing: stateError))
+        return (empty, true)
+    }
+
+    /// Moves an unusable store file aside once, before the first save overwrites it.
+    private func preserveUnreadableStore() {
+        loadFailed = false
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        let sidecar = storeURL.deletingLastPathComponent()
+            .appendingPathComponent("\(storeURL.lastPathComponent).unreadable-\(formatter.string(from: now()))")
+        try? FileManager.default.moveItem(at: storeURL, to: sidecar)
     }
 
     private func save() {
+        if loadFailed { preserveUnreadableStore() }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
