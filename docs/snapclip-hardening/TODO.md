@@ -251,4 +251,4 @@ Required mitigations per workstream
 - 2026-10-08: T01 done. Update-check delay clamped to updateCheckInterval; upper-bound assertion added. (#2)
 - 2026-10-08: T02 done. Unreadable tracked.json is logged and renamed to a tracked.json.unreadable-<timestamp> sidecar once before the first save; ENOENT silent, EPERM logged without rename. (#3)
 - 2026-10-08: T03 done. Screenshot event pipeline extracted to SnapClipCore.ScreenshotPipeline; copy-before-add, rescan flags, inFlight dedup and identity re-check now have guard-locking tests. (#4)
-- 2026-10-08: T04 done. TrackerStore.markSeen records an identity as seen (persisted, capped at maxSeen) without tracking it.
+- 2026-10-08: T04 done. TrackerStore.markSeen records an identity as seen (persisted, capped at maxSeen) without tracking it. (#5)
