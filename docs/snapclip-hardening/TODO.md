@@ -246,6 +246,7 @@ Required mitigations per workstream
 - No live run has hit the post-wait markSeen branch: renames at 0.2 ms and 250 ms after the file appeared both landed before SnapClip began its stability wait. A debug log line in that branch would let a live run confirm it.
 - The "Could not create <log>" failure is reachable only when the log directory already exists but is not writable. If the directory cannot be created, `createDirectory` throws first and the user sees the system error text instead.
 - Pre-existing upgrade-runner Lows from the T07 secreview: the watchdog can fire after waitUntilExit returns but before cancel, giving a false "Update timed out" (T08 did not fix it: cancel-after-waitUntilExit still leaves the window); createFile then FileHandle(forWritingTo:) on update.log follows a symlink swapped in between; SystemProcess is @unchecked Sendable.
+- No SIGKILL backstop: if brew ignores both SIGINT and SIGTERM, waitUntilExit blocks forever and isUpdating stays true until the app restarts (pre-existing; T08 moves it 60 s later).
 
 ## Log
 - 2026-10-08: Plan created at HEAD c7705e0.

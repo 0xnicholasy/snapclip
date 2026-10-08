@@ -32,7 +32,8 @@ public protocol UpgradeProcessLauncher: Sendable {
 
 /// The only place the upgrade flow creates a Foundation `Process`.
 public struct SystemUpgradeProcessLauncher: UpgradeProcessLauncher {
-    // Process is not Sendable; the runner only starts and waits on it from one thread, and the watchdog only terminates it.
+    // Process is not Sendable; the runner starts and waits on it from one thread. The watchdog interrupts it and a delayed
+    // terminator checks isRunning, then terminates; Process's isRunning/interrupt/terminate are safe to call from another thread.
     private final class SystemProcess: UpgradeProcess, @unchecked Sendable {
         let process = Process()
         func run() throws { try process.run() }
