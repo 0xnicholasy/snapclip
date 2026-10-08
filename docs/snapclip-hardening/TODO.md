@@ -2,7 +2,7 @@
 
 ultraplan: snapclip-hardening | branch: feat/snapclip-hardening | base: main | tag: pre-snapclip-hardening-main | created: 2026-10-08
 Status: ACTIVE
-Progress: 1/10 done
+Progress: 2/10 done
 
 ## Goal
 Close five gaps in SnapClip where failures are silent or past fixes have no regression test:
@@ -43,8 +43,8 @@ Required mitigations per workstream
 - D3: There is no CI. Verify locally with `swift build` and `swift test`, plus `scripts/build-app.sh` for any todo touching Sources/SnapClip/. (owner, 2026-10-08)
 - D4: Log forks to tasks/research/STATE.md. (owner)
 - D5: WS5 runs extraction before the signal change. T07 moves the runner into Core and adds tests for its current failure paths, still sending SIGTERM. T08 then adds SIGINT plus the grace period, so the new interrupt-order tests fail against the T07 runner. This reverses the spec's stage 2/3 order. (assumed, confirm by T07)
-- D6: The sidecar is named `tracked.json.unreadable-<yyyyMMdd'T'HHmmss'Z'>`, built from the store's injected `now()`. This is ISO 8601 basic format: it sorts correctly, has no colons, and two failures on the same day get different names. (assumed, confirm by T02)
-- D7: `CocoaError.fileReadNoSuchFile` counts as ENOENT: no log, no flag. `CocoaError.fileReadNoPermission` counts as EPERM: log it, but do not set the flag. Any other read error, or a decode failure after both the State and legacy attempts, logs the error and sets the flag. (assumed, confirm by T02)
+- D6: The sidecar is named `tracked.json.unreadable-<yyyyMMdd'T'HHmmss'Z'>`, built from the store's injected `now()`. This is ISO 8601 basic format: it sorts correctly, has no colons, and two failures on the same day get different names. (confirmed by T02, 2026-10-08)
+- D7: `CocoaError.fileReadNoSuchFile` counts as ENOENT: no log, no flag. `CocoaError.fileReadNoPermission` counts as EPERM: log it, but do not set the flag. Any other read error, or a decode failure after both the State and legacy attempts, logs the error and sets the flag. (confirmed by T02, 2026-10-08)
 - D8: The runner lives in Sources/SnapClipCore/UpgradeRunner.swift.
   - It defines the protocols `UpgradeProcess` and `UpgradeProcessLauncher`.
   - `SystemUpgradeProcessLauncher` is the only code that creates a Foundation `Process`.
@@ -68,7 +68,7 @@ Required mitigations per workstream
 - verify: `swift build`; `swift test --filter nextCheckIsDelayedUntil24HoursAfterLast`; mutation run (remove the clamp, run the filter, expect a failure, restore); `swift test`; codex review of the todo diff (D2)
 
 ### T02 Log and preserve an unreadable tracked.json
-- status: todo
+- status: done (#PR, 2026-10-08)
 - needs: none
 - size: M
 - scope:
@@ -247,3 +247,4 @@ Required mitigations per workstream
   - HEAD has 32 `@Test` cases; the spec says 30.
   - tasks/research/STATE.md is absent (D9).
 - 2026-10-08: T01 done. Update-check delay clamped to updateCheckInterval; upper-bound assertion added. (#2)
+- 2026-10-08: T02 done. Unreadable tracked.json is logged and renamed to a tracked.json.unreadable-<timestamp> sidecar once before the first save; ENOENT silent, EPERM logged without rename.

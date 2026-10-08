@@ -236,6 +236,53 @@ private func setScreenCaptureXattr(_ path: String) throws {
         f.store.sweep()
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
+
+    private func sidecars(in dir: URL) throws -> [URL] {
+        try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("tracked.json.unreadable-") }
+    }
+
+    @Test func unreadableStoreIsPreservedOnceBeforeFirstSave() throws {
+        let f = try Fixture()
+        let stateDir = f.dir.appendingPathComponent("state")
+        try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+        let url = stateDir.appendingPathComponent("tracked.json")
+        let garbage = Data("not json {{{".utf8)
+        try garbage.write(to: url)
+        let store = TrackerStore(storeURL: url, now: { f.clock.now }, trash: { _ in })
+        #expect(store.items.isEmpty)
+        #expect(store.seenIdentities.isEmpty)
+
+        store.add(path: try f.makeFile("a.png"))
+        let found = try sidecars(in: stateDir)
+        #expect(found.count == 1)
+        #expect(try Data(contentsOf: #require(found.first)) == garbage)
+        let reloaded = TrackerStore(storeURL: url, now: { f.clock.now }, trash: { _ in })
+        #expect(reloaded.items.count == 1)
+
+        f.clock.advance(5)
+        store.add(path: try f.makeFile("b.png"))
+        #expect(try sidecars(in: stateDir).count == 1)
+    }
+
+    @Test func freshStoreCreatesNoSidecar() throws {
+        let f = try Fixture()
+        f.store.add(path: try f.makeFile("a.png"))
+        #expect(try sidecars(in: f.dir.appendingPathComponent("state")).isEmpty)
+    }
+
+    @Test func permissionDeniedStoreIsNotRenamed() throws {
+        let f = try Fixture()
+        let stateDir = f.dir.appendingPathComponent("state")
+        try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+        let url = stateDir.appendingPathComponent("tracked.json")
+        try Data("{}".utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path) }
+        let store = TrackerStore(storeURL: url, now: { f.clock.now }, trash: { _ in })
+        store.add(path: try f.makeFile("a.png"))
+        #expect(try sidecars(in: stateDir).isEmpty)
+    }
 }
 
 @Suite struct ScreenCaptureSettingsTests {
