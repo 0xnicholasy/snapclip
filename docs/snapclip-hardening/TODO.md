@@ -241,6 +241,7 @@ Required mitigations per workstream
 - `tracked.json.unreadable-*` sidecars pile up with nothing to clean them up.
 - Sidecar names have one-second resolution. Two unusable loads in the same UTC second collide, the try? rename fails silently, and the save overwrites the file. Consider a unique suffix and logging the rename failure.
 - ScreenshotPipelineTests cover 2 of the 4 rescan flags (UserDropped and RootChanged untested) and have no negative case showing a plain itemCreated event does not list the folder.
+- No test covers markSeen's maxSeen cap or that markSeen on an unreadable store runs the sidecar rename before writing.
 
 ## Log
 - 2026-10-08: Plan created at HEAD c7705e0.
