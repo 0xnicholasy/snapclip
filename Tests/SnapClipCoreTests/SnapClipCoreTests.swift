@@ -341,6 +341,7 @@ private func setScreenCaptureXattr(_ path: String) throws {
         #expect(UpdateSchedule.delayUntilNextCheck(lastCheck: nil, now: now) == 5)
         #expect(UpdateSchedule.delayUntilNextCheck(lastCheck: now.addingTimeInterval(-3_600), now: now) == 82_800)
         #expect(UpdateSchedule.delayUntilNextCheck(lastCheck: now.addingTimeInterval(-90_000), now: now) == 5)
+        #expect(UpdateSchedule.delayUntilNextCheck(lastCheck: now.addingTimeInterval(864_000), now: now) == SnapClipConstants.updateCheckInterval)
     }
 }
 

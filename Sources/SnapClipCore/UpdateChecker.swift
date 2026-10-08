@@ -117,6 +117,6 @@ public enum UpdateSchedule {
     public static func delayUntilNextCheck(lastCheck: Date?, now: Date) -> TimeInterval {
         guard let lastCheck else { return SnapClipConstants.updateInitialDelay }
         let remaining = SnapClipConstants.updateCheckInterval - now.timeIntervalSince(lastCheck)
-        return max(SnapClipConstants.updateInitialDelay, remaining)
+        return min(SnapClipConstants.updateCheckInterval, max(SnapClipConstants.updateInitialDelay, remaining))
     }
 }
