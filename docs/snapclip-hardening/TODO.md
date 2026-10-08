@@ -68,7 +68,7 @@ Required mitigations per workstream
 - verify: `swift build`; `swift test --filter nextCheckIsDelayedUntil24HoursAfterLast`; mutation run (remove the clamp, run the filter, expect a failure, restore); `swift test`; codex review of the todo diff (D2)
 
 ### T02 Log and preserve an unreadable tracked.json
-- status: done (#PR, 2026-10-08)
+- status: done (#3, 2026-10-08)
 - needs: none
 - size: M
 - scope:
@@ -248,4 +248,4 @@ Required mitigations per workstream
   - HEAD has 32 `@Test` cases; the spec says 30.
   - tasks/research/STATE.md is absent (D9).
 - 2026-10-08: T01 done. Update-check delay clamped to updateCheckInterval; upper-bound assertion added. (#2)
-- 2026-10-08: T02 done. Unreadable tracked.json is logged and renamed to a tracked.json.unreadable-<timestamp> sidecar once before the first save; ENOENT silent, EPERM logged without rename.
+- 2026-10-08: T02 done. Unreadable tracked.json is logged and renamed to a tracked.json.unreadable-<timestamp> sidecar once before the first save; ENOENT silent, EPERM logged without rename. (#3)
