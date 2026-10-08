@@ -12,8 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var watcher: FolderWatcher?
     private var sweepTimer: Timer?
-    private var watchedFolder = ScreenshotLocation.resolve()
-    private var inFlight: Set<FileIdentity> = []
+    private lazy var pipeline = ScreenshotPipeline(
+        store: store, watchedFolder: ScreenshotLocation.resolve(),
+        copy: { [unowned self] in self.copyToClipboard(url: $0) })
     private let updates = UpdateController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -26,11 +27,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = item
 
         // Location is re-read on every start.
-        watchedFolder = ScreenshotLocation.resolve()
+        pipeline.watchedFolder = ScreenshotLocation.resolve()
         let folderWatcher = FolderWatcher { [weak self] events in
-            self?.handle(events)
+            self?.pipeline.handle(events)
         }
-        folderWatcher.start(folder: watchedFolder)
+        folderWatcher.start(folder: pipeline.watchedFolder)
         watcher = folderWatcher
 
         store.sweep()
@@ -69,46 +70,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: - Detection
-
-    private func handle(_ events: [FolderWatcher.Event]) {
-        let relevant = FSEventStreamEventFlags(
-            kFSEventStreamEventFlagItemCreated | kFSEventStreamEventFlagItemRenamed
-                | kFSEventStreamEventFlagItemModified | kFSEventStreamEventFlagItemXattrMod)
-        let isFile = FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsFile)
-        let needsRescan = FSEventStreamEventFlags(
-            kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagUserDropped
-                | kFSEventStreamEventFlagKernelDropped | kFSEventStreamEventFlagRootChanged)
-        if events.contains(where: { $0.flags & needsRescan != 0 }) {
-            rescanWatchedFolder()
-        }
-        for event in events where event.flags & isFile != 0 && event.flags & relevant != 0 {
-            consider(path: event.path)
-        }
-    }
-
-    private func rescanWatchedFolder() {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: watchedFolder.path)) ?? []
-        for name in names {
-            consider(path: watchedFolder.appendingPathComponent(name).path)
-        }
-    }
-
-    private func consider(path: String) {
-        guard let identity = FileIdentity.at(path: path), !inFlight.contains(identity),
-            ScreenshotPolicy.shouldTrack(
-                path: path, watchedFolder: watchedFolder, seen: store.seenIdentities, now: Date())
-        else { return }
-
-        let url = URL(fileURLWithPath: path)
-        inFlight.insert(identity)
-        Task { @MainActor in
-            let stable = await ScreenshotDetector.waitUntilStable(path: path)
-            inFlight.remove(identity)
-            guard stable, FileIdentity.at(path: path) == identity, copyToClipboard(url: url)
-            else { return }
-            store.add(path: path)
-        }
-    }
 
     @discardableResult
     private func copyToClipboard(url: URL) -> Bool {
@@ -231,6 +192,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openFolder() {
-        NSWorkspace.shared.open(watchedFolder)
+        NSWorkspace.shared.open(pipeline.watchedFolder)
     }
 }
