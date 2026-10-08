@@ -167,7 +167,7 @@ Required mitigations per workstream
 - verify: `swift build`; `swift test`; `scripts/build-app.sh`; the grep above; codex review (D2)
 
 ### T07 Move the Homebrew upgrade runner into SnapClipCore behind a fake-able process seam
-- status: done (#PR, 2026-10-08)
+- status: done (#8, 2026-10-08)
 - needs: T06
 - size: M
 - scope:
@@ -259,4 +259,4 @@ Required mitigations per workstream
 - 2026-10-08: T04 done. TrackerStore.markSeen records an identity as seen (persisted, capped at maxSeen) without tracking it. (#5)
 - 2026-10-08: T05 done. A screenshot renamed during the stability wait is marked seen, so the renamed file is never tracked or trashed; timeout and copy failure still leave it retryable. (#6)
 - 2026-10-08: T06 done. Removed the unreachable "Update installed" fileExists branch in finishUpgrade; the version check now leads straight to relaunch. (#7)
-- 2026-10-08: T07 done. The Homebrew upgrade runner moved into SnapClipCore.UpgradeRunner behind UpgradeProcess/UpgradeProcessLauncher; its five failure paths (brew missing, log not creatable, update fails, upgrade fails, timeout) have fake-launcher tests. Still SIGTERM on timeout. (#PR)
+- 2026-10-08: T07 done. The Homebrew upgrade runner moved into SnapClipCore.UpgradeRunner behind UpgradeProcess/UpgradeProcessLauncher; its five failure paths (brew missing, log not creatable, update fails, upgrade fails, timeout) have fake-launcher tests. Still SIGTERM on timeout. (#8)
