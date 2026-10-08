@@ -9,6 +9,7 @@ final class UpdateController {
         .appendingPathComponent("Library/Logs/SnapClip/update.log")
 
     private nonisolated static let upgradeTimeout: TimeInterval = 15 * 60
+    private nonisolated static let upgradeInterruptGrace: TimeInterval = 60
 
     private let defaults = UserDefaults.standard
     private let checker: UpdateChecker
@@ -149,7 +150,7 @@ final class UpdateController {
             let outcome = await withCheckedContinuation {
                 (continuation: CheckedContinuation<UpgradeOutcome, Never>) in
                 DispatchQueue.global(qos: .utility).async {
-                    continuation.resume(returning: UpgradeRunner.run(homebrew, logURL: logURL, timeout: Self.upgradeTimeout))
+                    continuation.resume(returning: UpgradeRunner.run(homebrew, logURL: logURL, timeout: Self.upgradeTimeout, grace: Self.upgradeInterruptGrace))
                 }
             }
             isUpdating = false

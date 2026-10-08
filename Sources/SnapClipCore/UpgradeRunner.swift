@@ -32,7 +32,8 @@ public protocol UpgradeProcessLauncher: Sendable {
 
 /// The only place the upgrade flow creates a Foundation `Process`.
 public struct SystemUpgradeProcessLauncher: UpgradeProcessLauncher {
-    // Process is not Sendable; the runner only starts and waits on it from one thread, and the watchdog only terminates it.
+    // Process is not Sendable; the runner starts and waits on it from one thread. The watchdog interrupts it and a delayed
+    // terminator checks isRunning, then terminates; Process's isRunning/interrupt/terminate are safe to call from another thread.
     private final class SystemProcess: UpgradeProcess, @unchecked Sendable {
         let process = Process()
         func run() throws { try process.run() }
@@ -62,10 +63,12 @@ public struct SystemUpgradeProcessLauncher: UpgradeProcessLauncher {
 
 public enum UpgradeRunner {
     /// Runs `brew update --quiet` then `brew upgrade snapclip`, logging to `logURL` (overwritten).
+    /// On `timeout` the process gets SIGINT; if it is still running `grace` seconds later it gets SIGTERM.
     public static func run(
         _ homebrew: HomebrewInstall,
         logURL: URL,
         timeout: TimeInterval,
+        grace: TimeInterval,
         launcher: UpgradeProcessLauncher = SystemUpgradeProcessLauncher(),
         isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
     ) -> UpgradeOutcome {
@@ -91,13 +94,18 @@ public enum UpgradeRunner {
                     log: log)
                 try process.run()
                 let timedOut = TimeoutFlag()
+                let terminator = DispatchWorkItem {
+                    if process.isRunning { process.terminate() }
+                }
                 let watchdog = DispatchWorkItem {
                     timedOut.set()
-                    process.terminate()
+                    process.interrupt()
+                    DispatchQueue.global().asyncAfter(deadline: .now() + grace, execute: terminator)
                 }
                 DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
                 process.waitUntilExit()
                 watchdog.cancel()
+                terminator.cancel()
                 if timedOut.isSet { return .failed("Update timed out") }
                 if process.terminationStatus != 0 {
                     return .failed("brew \(arguments[0]) exited with status \(process.terminationStatus)")

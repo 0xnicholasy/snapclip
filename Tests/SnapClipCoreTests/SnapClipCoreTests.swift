@@ -458,29 +458,42 @@ private func setScreenCaptureXattr(_ path: String) throws {
 
 @Suite struct UpgradeRunnerTests {
     private final class FakeProcess: UpgradeProcess, @unchecked Sendable {
-        enum Behavior { case exits(Int32), hangsUntilTerminated }
+        enum Behavior { case exits(Int32), ignoresInterrupt, exitsOnInterrupt }
+        enum Signal: Equatable { case interrupt, terminate }
         private let behavior: Behavior
         private let lock = NSLock()
         private let exited = DispatchSemaphore(value: 0)
         private var status: Int32 = 0
-        private var terminateCount = 0
+        private var running = true
+        private var received: [Signal] = []
         init(_ behavior: Behavior) { self.behavior = behavior }
 
-        var terminations: Int { lock.withLock { terminateCount } }
-        var isRunning: Bool { false }
+        /// Signals in the order the runner sent them.
+        var signals: [Signal] { lock.withLock { received } }
+        var isRunning: Bool { lock.withLock { running } }
         var terminationStatus: Int32 { lock.withLock { status } }
         func run() throws {}
-        func interrupt() {}
         func waitUntilExit() {
-            switch behavior {
-            case .exits(let code): lock.withLock { status = code }
-            case .hangsUntilTerminated:
-                // Bounded so a runner that never terminates fails the test instead of hanging it.
-                if exited.wait(timeout: .now() + 5) == .timedOut { return }
+            if case .exits(let code) = behavior {
+                lock.withLock { status = code; running = false }
+                return
             }
+            // Bounded so a runner that never escalates fails the test instead of hanging it.
+            _ = exited.wait(timeout: .now() + 5)
+            // The process has exited but waitUntilExit returns late, past the grace period, so only an
+            // isRunning check keeps the runner's delayed terminate from signalling an exited process.
+            if case .exitsOnInterrupt = behavior { Thread.sleep(forTimeInterval: 0.3) }
+        }
+        func interrupt() {
+            lock.withLock { received.append(.interrupt) }
+            if case .exitsOnInterrupt = behavior { finish(status: 130) }
         }
         func terminate() {
-            lock.withLock { terminateCount += 1; status = 15 }
+            lock.withLock { received.append(.terminate) }
+            finish(status: 15)
+        }
+        private func finish(status newStatus: Int32) {
+            lock.withLock { status = newStatus; running = false }
             exited.signal()
         }
     }
@@ -522,7 +535,7 @@ private func setScreenCaptureXattr(_ path: String) throws {
         let dir = try tempDir()
         let launcher = FakeLauncher([])
         let outcome = UpgradeRunner.run(
-            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 5,
+            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 5, grace: 5,
             launcher: launcher, isExecutable: { _ in false })
         #expect(outcome == .failed("Homebrew was not found at /opt/homebrew/bin/brew"))
         #expect(launcher.launches.isEmpty)
@@ -535,7 +548,7 @@ private func setScreenCaptureXattr(_ path: String) throws {
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path) }
         let launcher = FakeLauncher([])
         let outcome = UpgradeRunner.run(
-            try install(), logURL: logURL, timeout: 5, launcher: launcher, isExecutable: { _ in true })
+            try install(), logURL: logURL, timeout: 5, grace: 5, launcher: launcher, isExecutable: { _ in true })
         #expect(outcome == .failed("Could not create \(logURL.path)"))
         #expect(launcher.launches.isEmpty)
     }
@@ -544,7 +557,7 @@ private func setScreenCaptureXattr(_ path: String) throws {
         let dir = try tempDir()
         let launcher = FakeLauncher([.exits(1)])
         let outcome = UpgradeRunner.run(
-            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 5,
+            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 5, grace: 5,
             launcher: launcher, isExecutable: { _ in true })
         #expect(outcome == .failed("brew update exited with status 1"))
         #expect(launcher.launches == [["update", "--quiet"]])
@@ -555,7 +568,7 @@ private func setScreenCaptureXattr(_ path: String) throws {
         let launcher = FakeLauncher([.exits(0), .exits(1)])
         let logURL = dir.appendingPathComponent("update.log")
         let outcome = UpgradeRunner.run(
-            try install(), logURL: logURL, timeout: 5,
+            try install(), logURL: logURL, timeout: 5, grace: 5,
             launcher: launcher, isExecutable: { _ in true })
         #expect(outcome == .failed("brew upgrade exited with status 1"))
         #expect(launcher.launches == [["update", "--quiet"], ["upgrade", "snapclip"]])
@@ -563,14 +576,24 @@ private func setScreenCaptureXattr(_ path: String) throws {
         #expect(log == "$ brew update --quiet\n$ brew upgrade snapclip\n")
     }
 
-    @Test func hungBrewIsTerminatedAfterTimeout() throws {
+    @Test func brewIgnoringInterruptIsTerminatedAfterGrace() throws {
         let dir = try tempDir()
-        let launcher = FakeLauncher([.hangsUntilTerminated])
+        let launcher = FakeLauncher([.ignoresInterrupt])
         let outcome = UpgradeRunner.run(
-            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 0.05,
+            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 0.05, grace: 0.05,
             launcher: launcher, isExecutable: { _ in true })
         #expect(outcome == .failed("Update timed out"))
-        #expect(launcher.processes.first?.terminations == 1)
+        #expect(launcher.processes.first?.signals == [.interrupt, .terminate])
+    }
+
+    @Test func brewExitingOnInterruptIsNotTerminated() throws {
+        let dir = try tempDir()
+        let launcher = FakeLauncher([.exitsOnInterrupt])
+        let outcome = UpgradeRunner.run(
+            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 0.05, grace: 0.1,
+            launcher: launcher, isExecutable: { _ in true })
+        #expect(outcome == .failed("Update timed out"))
+        #expect(launcher.processes.first?.signals == [.interrupt])
     }
 }
 
