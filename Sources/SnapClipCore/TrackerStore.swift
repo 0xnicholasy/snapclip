@@ -30,7 +30,7 @@ public final class TrackerStore {
     public private(set) var seen: [FileIdentity]
     private var dirty = false
     /// Set when the store file existed but could not be used; the next save moves it aside first.
-    private var loadFailed = false
+    private(set) var loadFailed = false
     private let storeURL: URL
     private let now: () -> Date
     private let trash: Trash

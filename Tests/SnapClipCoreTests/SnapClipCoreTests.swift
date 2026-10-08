@@ -250,6 +250,7 @@ private func setScreenCaptureXattr(_ path: String) throws {
         let garbage = Data("not json {{{".utf8)
         try garbage.write(to: url)
         let store = TrackerStore(storeURL: url, now: { f.clock.now }, trash: { _ in })
+        #expect(store.loadFailed)
         #expect(store.items.isEmpty)
         #expect(store.seenIdentities.isEmpty)
 
@@ -267,6 +268,7 @@ private func setScreenCaptureXattr(_ path: String) throws {
 
     @Test func freshStoreCreatesNoSidecar() throws {
         let f = try Fixture()
+        #expect(!f.store.loadFailed)
         f.store.add(path: try f.makeFile("a.png"))
         #expect(try sidecars(in: f.dir.appendingPathComponent("state")).isEmpty)
     }
@@ -280,6 +282,7 @@ private func setScreenCaptureXattr(_ path: String) throws {
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path) }
         let store = TrackerStore(storeURL: url, now: { f.clock.now }, trash: { _ in })
+        #expect(!store.loadFailed)
         store.add(path: try f.makeFile("a.png"))
         #expect(try sidecars(in: stateDir).isEmpty)
     }
