@@ -79,22 +79,20 @@ public final class TrackerStore {
     }
 
     /// Record `identity` as seen without tracking it, so a file the pipeline skips is not
-    /// picked up again after a rename. Persists immediately; leaves `items` untouched, no sweep.
+    /// picked up again after a rename. Always persists, so a repeat call retries a failed save;
+    /// leaves `items` untouched, no sweep.
     public func markSeen(_ identity: FileIdentity) {
-        guard recordSeen(identity) else { return }
+        recordSeen(identity)
         save()
     }
 
     /// Append `identity` to `seen` if absent and cap the list at `maxSeen`, dropping the oldest.
-    /// Returns whether it was appended.
-    @discardableResult
-    private func recordSeen(_ identity: FileIdentity) -> Bool {
-        guard !seen.contains(identity) else { return false }
+    private func recordSeen(_ identity: FileIdentity) {
+        guard !seen.contains(identity) else { return }
         seen.append(identity)
         if seen.count > SnapClipConstants.maxSeen {
             seen.removeFirst(seen.count - SnapClipConstants.maxSeen)
         }
-        return true
     }
 
     /// Drop moved files, trash expired ones, then trash oldest while over the cap.
