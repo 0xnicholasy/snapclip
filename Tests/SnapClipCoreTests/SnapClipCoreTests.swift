@@ -171,6 +171,18 @@ private func setScreenCaptureXattr(_ path: String) throws {
         #expect(!accepts(f, renamed, seen: f.store.seenIdentities))
     }
 
+    @Test func markedSeenFileIsNotTrackedAfterRename() throws {
+        let f = try Fixture()
+        let path = try f.makeFile("shot.png")
+        try setScreenCaptureXattr(path)
+        #expect(accepts(f, path), "an eligible screenshot is accepted before it is marked")
+        f.store.markSeen(try #require(FileIdentity.at(path: path)))
+        let renamed = f.dir.appendingPathComponent("kept.png").path
+        try FileManager.default.moveItem(atPath: path, toPath: renamed)
+        #expect(!accepts(f, renamed, seen: f.store.seenIdentities))
+        #expect(f.store.items.isEmpty)
+    }
+
     @Test func seenFileMovedIntoFolderIsNotTrackedAgain() throws {
         let f = try Fixture()
         let elsewhere = f.dir.appendingPathComponent("elsewhere", isDirectory: true)
@@ -210,6 +222,15 @@ private func setScreenCaptureXattr(_ path: String) throws {
             trash: { _ in })
         #expect(reloaded.items.map(\.path) == [path])
         #expect(reloaded.seenIdentities == [identity])
+
+        let markedPath = try f.makeFile("b.png")
+        let marked = try #require(FileIdentity.at(path: markedPath))
+        f.store.markSeen(marked)
+        let reloadedAgain = TrackerStore(
+            storeURL: f.dir.appendingPathComponent("state/tracked.json"), now: { f.clock.now },
+            trash: { _ in })
+        #expect(reloadedAgain.seenIdentities == [identity, marked])
+        #expect(reloadedAgain.items.map(\.path) == [path])
     }
 
     @Test func legacyArrayFormatStillDecodes() throws {

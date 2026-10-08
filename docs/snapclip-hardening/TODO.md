@@ -2,7 +2,7 @@
 
 ultraplan: snapclip-hardening | branch: feat/snapclip-hardening | base: main | tag: pre-snapclip-hardening-main | created: 2026-10-08
 Status: ACTIVE
-Progress: 3/10 done
+Progress: 4/10 done
 
 ## Goal
 Close five gaps in SnapClip where failures are silent or past fixes have no regression test:
@@ -118,7 +118,7 @@ Required mitigations per workstream
 - verify: `swift build`; `swift test --filter ScreenshotPipelineTests`; the four mutation runs; `swift test`; `scripts/build-app.sh`, then launch the built app, trigger Cmd+Shift+4 via System Events with the real `defaults`, and paste to confirm the clipboard; codex review (D2)
 
 ### T04 Add a persisted TrackerStore.markSeen
-- status: todo
+- status: done (#5, 2026-10-08)
 - needs: T02
 - size: S
 - scope:
@@ -241,6 +241,7 @@ Required mitigations per workstream
 - `tracked.json.unreadable-*` sidecars pile up with nothing to clean them up.
 - Sidecar names have one-second resolution. Two unusable loads in the same UTC second collide, the try? rename fails silently, and the save overwrites the file. Consider a unique suffix and logging the rename failure.
 - ScreenshotPipelineTests cover 2 of the 4 rescan flags (UserDropped and RootChanged untested) and have no negative case showing a plain itemCreated event does not list the folder.
+- No test covers markSeen's maxSeen cap or that markSeen on an unreadable store runs the sidecar rename before writing.
 
 ## Log
 - 2026-10-08: Plan created at HEAD c7705e0.
@@ -251,3 +252,4 @@ Required mitigations per workstream
 - 2026-10-08: T01 done. Update-check delay clamped to updateCheckInterval; upper-bound assertion added. (#2)
 - 2026-10-08: T02 done. Unreadable tracked.json is logged and renamed to a tracked.json.unreadable-<timestamp> sidecar once before the first save; ENOENT silent, EPERM logged without rename. (#3)
 - 2026-10-08: T03 done. Screenshot event pipeline extracted to SnapClipCore.ScreenshotPipeline; copy-before-add, rescan flags, inFlight dedup and identity re-check now have guard-locking tests. (#4)
+- 2026-10-08: T04 done. TrackerStore.markSeen records an identity as seen (persisted, capped at maxSeen) without tracking it. (#5)
