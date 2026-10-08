@@ -2,7 +2,7 @@
 
 ultraplan: snapclip-hardening | branch: feat/snapclip-hardening | base: main | tag: pre-snapclip-hardening-main | created: 2026-10-08
 Status: ACTIVE
-Progress: 2/10 done
+Progress: 3/10 done
 
 ## Goal
 Close five gaps in SnapClip where failures are silent or past fixes have no regression test:
@@ -51,7 +51,7 @@ Required mitigations per workstream
   - `isExecutable`, `timeout`, and `grace` are injected, so tests need no real executable and no real waits.
   (assumed, confirm by T07)
 - D9: tasks/research/STATE.md does not exist at HEAD and nothing gitignores it. The first todo that logs a fork creates it and commits it alongside TODO.md; later todos append to it in their own PR. (assumed, confirm by T01)
-- D10: `ScreenshotPipeline.handle` returns the Tasks it spawns (`@discardableResult`), so tests can await them instead of sleeping. (assumed, confirm by T03)
+- D10: `ScreenshotPipeline.handle` returns the Tasks it spawns (`@discardableResult`), so tests can await them instead of sleeping. (confirmed by T03, 2026-10-08)
 
 ## Todos
 
@@ -91,7 +91,7 @@ Required mitigations per workstream
 - verify: `swift build`; `swift test --filter PersistenceTests`; the three mutation runs above; `swift test`; codex review (D2)
 
 ### T03 Extract the screenshot event pipeline into SnapClipCore with guard-locking tests
-- status: todo
+- status: done (#PR, 2026-10-08)
 - needs: none
 - size: M
 - scope:
@@ -249,3 +249,4 @@ Required mitigations per workstream
   - tasks/research/STATE.md is absent (D9).
 - 2026-10-08: T01 done. Update-check delay clamped to updateCheckInterval; upper-bound assertion added. (#2)
 - 2026-10-08: T02 done. Unreadable tracked.json is logged and renamed to a tracked.json.unreadable-<timestamp> sidecar once before the first save; ENOENT silent, EPERM logged without rename. (#3)
+- 2026-10-08: T03 done. Screenshot event pipeline extracted to SnapClipCore.ScreenshotPipeline; copy-before-add, rescan flags, inFlight dedup and identity re-check now have guard-locking tests.

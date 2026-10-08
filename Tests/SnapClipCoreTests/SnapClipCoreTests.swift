@@ -434,3 +434,95 @@ private func setScreenCaptureXattr(_ path: String) throws {
         #expect(env["HOMEBREW_NO_AUTO_UPDATE"] == "1")
     }
 }
+
+@MainActor
+@Suite struct ScreenshotPipelineTests {
+    @MainActor private final class Probe {
+        var copies: [URL] = []
+        var listed: [URL] = []
+        var copyResult = true
+        var gates: [CheckedContinuation<Void, Never>] = []
+        var identityOverride: FileIdentity?
+
+        func openGates() async {
+            while gates.isEmpty { await Task.yield() }
+            for _ in 0..<10 { await Task.yield() }
+            gates.forEach { $0.resume() }
+        }
+    }
+
+    private func makePipeline(_ f: Fixture, _ probe: Probe, names: [String] = [], gated: Bool = false)
+        -> ScreenshotPipeline
+    {
+        ScreenshotPipeline(
+            store: f.store, watchedFolder: f.dir,
+            waitUntilStable: { _ in
+                if gated { await withCheckedContinuation { probe.gates.append($0) } }
+                return true
+            },
+            copy: { probe.copies.append($0); return probe.copyResult },
+            listFolder: { probe.listed.append($0); return names },
+            identityOf: { probe.identityOverride ?? FileIdentity.at(path: $0) },
+            now: Date.init)
+    }
+
+    private func screenshot(_ f: Fixture, _ name: String) throws -> String {
+        let path = try f.makeFile(name)
+        try setScreenCaptureXattr(path)
+        return path
+    }
+
+    private func created(_ path: String) -> ScreenshotPipeline.Event {
+        .init(path: path, flags: [.itemIsFile, .itemCreated])
+    }
+
+    @Test func failedCopyIsNotTracked() async throws {
+        let f = try Fixture()
+        let probe = Probe()
+        probe.copyResult = false
+        let pipeline = makePipeline(f, probe)
+        let path = try screenshot(f, "shot.png")
+        for task in pipeline.handle([created(path)]) { await task.value }
+        #expect(probe.copies.count == 1)
+        #expect(!f.store.isTracked(path: path))
+    }
+
+    @Test func droppedEventsRescanTheWatchedFolder() async throws {
+        for flag: ScreenshotPipeline.EventFlags in [.mustScanSubDirs, .kernelDropped] {
+            let f = try Fixture()
+            let probe = Probe()
+            let path = try screenshot(f, "shot.png")
+            let pipeline = makePipeline(f, probe, names: ["shot.png"])
+            for task in pipeline.handle([.init(path: f.dir.path, flags: flag)]) { await task.value }
+            #expect(probe.listed == [f.dir])
+            #expect(f.store.isTracked(path: path))
+        }
+    }
+
+    @Test func duplicateEventWhileInFlightCopiesOnce() async throws {
+        let f = try Fixture()
+        let probe = Probe()
+        let pipeline = makePipeline(f, probe, gated: true)
+        let path = try screenshot(f, "shot.png")
+        let first = pipeline.handle([created(path)])
+        let second = pipeline.handle([created(path)])
+        #expect(first.count == 1)
+        #expect(second.isEmpty)
+        await probe.openGates()
+        for task in first + second { await task.value }
+        #expect(probe.copies.count == 1)
+    }
+
+    @Test func identityChangeDuringWaitIsNotAdded() async throws {
+        let f = try Fixture()
+        let probe = Probe()
+        let pipeline = makePipeline(f, probe, gated: true)
+        let path = try screenshot(f, "shot.png")
+        let tasks = pipeline.handle([created(path)])
+        probe.identityOverride = FileIdentity(inode: 1, device: 1)
+        await probe.openGates()
+        for task in tasks { await task.value }
+        #expect(probe.copies.isEmpty)
+        #expect(!f.store.isTracked(path: path))
+    }
+}
