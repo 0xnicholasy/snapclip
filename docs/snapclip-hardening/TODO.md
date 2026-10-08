@@ -245,6 +245,7 @@ Required mitigations per workstream
 - failedCopyIsNotTracked does not assert the identity stays out of seenIdentities after a copy failure.
 - No live run has hit the post-wait markSeen branch: renames at 0.2 ms and 250 ms after the file appeared both landed before SnapClip began its stability wait. A debug log line in that branch would let a live run confirm it.
 - The "Could not create <log>" failure is reachable only when the log directory already exists but is not writable. If the directory cannot be created, `createDirectory` throws first and the user sees the system error text instead.
+- Pre-existing upgrade-runner Lows from the T07 secreview: the watchdog can fire after waitUntilExit returns but before cancel, giving a false "Update timed out" (fold into T08); createFile then FileHandle(forWritingTo:) on update.log follows a symlink swapped in between; SystemProcess is @unchecked Sendable.
 
 ## Log
 - 2026-10-08: Plan created at HEAD c7705e0.

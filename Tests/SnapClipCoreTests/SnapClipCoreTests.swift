@@ -474,7 +474,9 @@ private func setScreenCaptureXattr(_ path: String) throws {
         func waitUntilExit() {
             switch behavior {
             case .exits(let code): lock.withLock { status = code }
-            case .hangsUntilTerminated: exited.wait()
+            case .hangsUntilTerminated:
+                // Bounded so a runner that never terminates fails the test instead of hanging it.
+                if exited.wait(timeout: .now() + 5) == .timedOut { return }
             }
         }
         func terminate() {
@@ -551,11 +553,14 @@ private func setScreenCaptureXattr(_ path: String) throws {
     @Test func failedUpgradeReportsItsStatus() throws {
         let dir = try tempDir()
         let launcher = FakeLauncher([.exits(0), .exits(1)])
+        let logURL = dir.appendingPathComponent("update.log")
         let outcome = UpgradeRunner.run(
-            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 5,
+            try install(), logURL: logURL, timeout: 5,
             launcher: launcher, isExecutable: { _ in true })
         #expect(outcome == .failed("brew upgrade exited with status 1"))
         #expect(launcher.launches == [["update", "--quiet"], ["upgrade", "snapclip"]])
+        let log = try String(contentsOf: logURL, encoding: .utf8)
+        #expect(log == "$ brew update --quiet\n$ brew upgrade snapclip\n")
     }
 
     @Test func hungBrewIsTerminatedAfterTimeout() throws {
