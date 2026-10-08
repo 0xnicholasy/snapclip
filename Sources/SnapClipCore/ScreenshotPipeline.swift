@@ -97,7 +97,8 @@ public final class ScreenshotPipeline {
             let stable = await waitUntilStable(path)
             inFlight.remove(identity)
             // Renamed or replaced during the wait: remember the original file so it is not
-            // tracked (and later trashed) under its new name. Never on timeout or copy failure.
+            // tracked (and later trashed) under its new name. Never on a timeout with unchanged
+            // identity or on copy failure.
             if identityOf(path) != identity {
                 store.markSeen(identity)
                 return
