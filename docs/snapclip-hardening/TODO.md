@@ -56,7 +56,7 @@ Required mitigations per workstream
 ## Todos
 
 ### T01 Clamp the automatic update-check delay to the check interval
-- status: done (#PR, 2026-10-08)
+- status: done (#2, 2026-10-08)
 - needs: none
 - size: S
 - scope:
@@ -246,4 +246,4 @@ Required mitigations per workstream
   - Not yet re-checked: ScreenshotPolicy.swift:18-20 (T04) and tasks/todo.md:32-33 (T03).
   - HEAD has 32 `@Test` cases; the spec says 30.
   - tasks/research/STATE.md is absent (D9).
-- 2026-10-08: T01 done. Update-check delay clamped to updateCheckInterval; upper-bound assertion added.
+- 2026-10-08: T01 done. Update-check delay clamped to updateCheckInterval; upper-bound assertion added. (#2)
