@@ -2,7 +2,7 @@
 
 ultraplan: snapclip-hardening | branch: feat/snapclip-hardening | base: main | tag: pre-snapclip-hardening-main | created: 2026-10-08
 Status: ACTIVE
-Progress: 7/10 done
+Progress: 8/10 done
 
 ## Goal
 Close five gaps in SnapClip where failures are silent or past fixes have no regression test:
@@ -193,7 +193,7 @@ Required mitigations per workstream
 - verify: `swift build`; `swift test --filter UpgradeRunnerTests`; the five mutation runs; `swift test`; `scripts/build-app.sh`; the two greps above; `/secreview` on the todo diff; codex review (D2)
 
 ### T08 Interrupt a timed-out brew with SIGINT before SIGTERM
-- status: todo
+- status: done (#9, 2026-10-08)
 - needs: T07
 - size: S
 - scope:
@@ -245,7 +245,7 @@ Required mitigations per workstream
 - failedCopyIsNotTracked does not assert the identity stays out of seenIdentities after a copy failure.
 - No live run has hit the post-wait markSeen branch: renames at 0.2 ms and 250 ms after the file appeared both landed before SnapClip began its stability wait. A debug log line in that branch would let a live run confirm it.
 - The "Could not create <log>" failure is reachable only when the log directory already exists but is not writable. If the directory cannot be created, `createDirectory` throws first and the user sees the system error text instead.
-- Pre-existing upgrade-runner Lows from the T07 secreview: the watchdog can fire after waitUntilExit returns but before cancel, giving a false "Update timed out" (fold into T08); createFile then FileHandle(forWritingTo:) on update.log follows a symlink swapped in between; SystemProcess is @unchecked Sendable.
+- Pre-existing upgrade-runner Lows from the T07 secreview: the watchdog can fire after waitUntilExit returns but before cancel, giving a false "Update timed out" (T08 did not fix it: cancel-after-waitUntilExit still leaves the window); createFile then FileHandle(forWritingTo:) on update.log follows a symlink swapped in between; SystemProcess is @unchecked Sendable.
 
 ## Log
 - 2026-10-08: Plan created at HEAD c7705e0.
@@ -260,3 +260,4 @@ Required mitigations per workstream
 - 2026-10-08: T05 done. A screenshot renamed during the stability wait is marked seen, so the renamed file is never tracked or trashed; timeout and copy failure still leave it retryable. (#6)
 - 2026-10-08: T06 done. Removed the unreachable "Update installed" fileExists branch in finishUpgrade; the version check now leads straight to relaunch. (#7)
 - 2026-10-08: T07 done. The Homebrew upgrade runner moved into SnapClipCore.UpgradeRunner behind UpgradeProcess/UpgradeProcessLauncher; its five failure paths (brew missing, log not creatable, update fails, upgrade fails, timeout) have fake-launcher tests. Still SIGTERM on timeout. (#8)
+- 2026-10-08: T08 done. On timeout the runner sends SIGINT, then SIGTERM after an injected grace (60 s in UpdateController) only if the process is still running; two fake-process tests lock the order [interrupt, terminate] and [interrupt]. (#9)

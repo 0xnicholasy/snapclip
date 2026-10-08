@@ -62,10 +62,12 @@ public struct SystemUpgradeProcessLauncher: UpgradeProcessLauncher {
 
 public enum UpgradeRunner {
     /// Runs `brew update --quiet` then `brew upgrade snapclip`, logging to `logURL` (overwritten).
+    /// On `timeout` the process gets SIGINT; if it is still running `grace` seconds later it gets SIGTERM.
     public static func run(
         _ homebrew: HomebrewInstall,
         logURL: URL,
         timeout: TimeInterval,
+        grace: TimeInterval,
         launcher: UpgradeProcessLauncher = SystemUpgradeProcessLauncher(),
         isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
     ) -> UpgradeOutcome {
@@ -91,13 +93,18 @@ public enum UpgradeRunner {
                     log: log)
                 try process.run()
                 let timedOut = TimeoutFlag()
+                let terminator = DispatchWorkItem {
+                    if process.isRunning { process.terminate() }
+                }
                 let watchdog = DispatchWorkItem {
                     timedOut.set()
-                    process.terminate()
+                    process.interrupt()
+                    DispatchQueue.global().asyncAfter(deadline: .now() + grace, execute: terminator)
                 }
                 DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
                 process.waitUntilExit()
                 watchdog.cancel()
+                terminator.cancel()
                 if timedOut.isSet { return .failed("Update timed out") }
                 if process.terminationStatus != 0 {
                     return .failed("brew \(arguments[0]) exited with status \(process.terminationStatus)")
