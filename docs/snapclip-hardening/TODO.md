@@ -256,4 +256,4 @@ Required mitigations per workstream
 - 2026-10-08: T03 done. Screenshot event pipeline extracted to SnapClipCore.ScreenshotPipeline; copy-before-add, rescan flags, inFlight dedup and identity re-check now have guard-locking tests. (#4)
 - 2026-10-08: T04 done. TrackerStore.markSeen records an identity as seen (persisted, capped at maxSeen) without tracking it. (#5)
 - 2026-10-08: T05 done. A screenshot renamed during the stability wait is marked seen, so the renamed file is never tracked or trashed; timeout and copy failure still leave it retryable. (#6)
-- 2026-10-08: T06 done. Removed the unreachable "Update installed" fileExists branch in finishUpgrade; the version check now leads straight to relaunch.
+- 2026-10-08: T06 done. Removed the unreachable "Update installed" fileExists branch in finishUpgrade; the version check now leads straight to relaunch. (#7)
