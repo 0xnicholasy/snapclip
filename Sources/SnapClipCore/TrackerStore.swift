@@ -124,7 +124,8 @@ public final class TrackerStore {
 
     /// `unusable` is true when the file exists but could not be read or decoded, so the caller
     /// can preserve it before overwriting. A missing file or a permission error is not flagged:
-    /// the first is normal, and the second would fail the rename as well.
+    /// the first is normal, and the second skips the rename on purpose (constraint WS2); whether
+    /// saves should be blocked in that case is an open backlog decision.
     private static func load(from url: URL) -> (state: State, unusable: Bool) {
         let empty = State(items: [], seen: [])
         let data: Data
