@@ -212,7 +212,7 @@ Required mitigations per workstream
 - verify: `swift build`; `swift test --filter UpgradeRunnerTests`; mutation run (restore the direct `terminate()`, expect both tests to fail); `swift test`; `scripts/build-app.sh`; `/secreview` on the todo diff; codex review (D2)
 
 ### T09 Verify the SIGINT path against real Homebrew and record the lesson
-- status: skipped (owner decision 2026-10-09: no SnapClip release newer than 0.1.2 is published, so the real-Homebrew SIGINT check was never run; #<PR>)
+- status: skipped (owner decision 2026-10-09: no SnapClip release newer than 0.1.2 is published, so the real-Homebrew SIGINT check was never run; #10)
 - needs: T08
 - size: S
 - scope:
