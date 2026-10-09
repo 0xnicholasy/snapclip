@@ -1,8 +1,8 @@
 # SnapClip hardening pass
 
 ultraplan: snapclip-hardening | branch: feat/snapclip-hardening | base: main | tag: pre-snapclip-hardening-main | created: 2026-10-08
-Status: ACTIVE
-Progress: 9/10 done
+Status: COMPLETE 2026-10-09, kept as backlog
+Progress: 10/10 done
 
 ## Goal
 Close five gaps in SnapClip where failures are silent or past fixes have no regression test:
@@ -230,7 +230,7 @@ Required mitigations per workstream
 - verify: `scripts/build-app.sh` (with the temporary timeout); the manual Install Update run; `brew list --versions snapclip`; revert the timeout, then `git diff --stat`, `swift build`, `swift test`, and `scripts/build-app.sh`; codex review (D2)
 
 ### TZZ Cleanup and land
-- status: todo
+- status: done (#PRNUM, 2026-10-09)
 - needs: every other todo
 - scope: run `/implement cleanup`
 - done when: skill removed from the branch, TODO.md archived, landing PR into main open and approved by the owner
@@ -264,3 +264,4 @@ Required mitigations per workstream
 - 2026-10-08: T07 done. The Homebrew upgrade runner moved into SnapClipCore.UpgradeRunner behind UpgradeProcess/UpgradeProcessLauncher; its five failure paths (brew missing, log not creatable, update fails, upgrade fails, timeout) have fake-launcher tests. Still SIGTERM on timeout. (#8)
 - 2026-10-08: T08 done. On timeout the runner sends SIGINT, then SIGTERM after an injected grace (60 s in UpdateController) only if the process is still running; two fake-process tests lock the order [interrupt, terminate] and [interrupt]. (#9)
 - 2026-10-09: T09 skipped by owner: no release newer than 0.1.2 exists, so the real brew signal check was not run. The gap is recorded in tasks/lessons.md and the Backlog.
+- 2026-10-09: TZZ done. The /implement skill was removed from the branch, TODO.md archived as a backlog, and the landing PR into main opened for the owner to merge. (#PRNUM)
