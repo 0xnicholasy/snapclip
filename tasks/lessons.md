@@ -13,3 +13,8 @@
 - The live T05 check renamed the screenshot 0.2 ms and 250 ms after it appeared. Both renames landed before SnapClip began its 400 ms stability wait (FSEvents latency 0.2 s plus 200 ms polls), so the post-wait markSeen branch never ran.
 - "File not tracked" passes even if the wait was never entered, so it does not show the branch was exercised.
 - Rule: before claiming a branch was exercised live, check that the inode appears in tracked.json `seen`, or add a log line in the branch.
+
+## 2026-10-09: real Homebrew's reaction to SIGINT/SIGTERM is unverified
+- How real brew reacts to SIGINT or SIGTERM mid-upgrade cannot be unit-tested. UpgradeRunnerTests use a fake process and lock only the signal order: interrupt, ~60 s grace, then terminate.
+- The manual check (debug build with `upgradeTimeout = 5`, Install Update from a Cellar install, read update.log, `brew list --versions snapclip`) was skipped on 2026-10-09 because no release newer than 0.1.2 existed. Homebrew's actual cleanup on interrupt is UNVERIFIED.
+- Rule: run that check at the next release (v0.1.3+) before treating the interrupt path as proven.

@@ -2,7 +2,7 @@
 
 ultraplan: snapclip-hardening | branch: feat/snapclip-hardening | base: main | tag: pre-snapclip-hardening-main | created: 2026-10-08
 Status: ACTIVE
-Progress: 8/10 done
+Progress: 9/10 done
 
 ## Goal
 Close five gaps in SnapClip where failures are silent or past fixes have no regression test:
@@ -212,7 +212,7 @@ Required mitigations per workstream
 - verify: `swift build`; `swift test --filter UpgradeRunnerTests`; mutation run (restore the direct `terminate()`, expect both tests to fail); `swift test`; `scripts/build-app.sh`; `/secreview` on the todo diff; codex review (D2)
 
 ### T09 Verify the SIGINT path against real Homebrew and record the lesson
-- status: todo
+- status: skipped (owner decision 2026-10-09: no SnapClip release newer than 0.1.2 is published, so the real-Homebrew SIGINT check was never run; #<PR>)
 - needs: T08
 - size: S
 - scope:
@@ -247,6 +247,7 @@ Required mitigations per workstream
 - The "Could not create <log>" failure is reachable only when the log directory already exists but is not writable. If the directory cannot be created, `createDirectory` throws first and the user sees the system error text instead.
 - Pre-existing upgrade-runner Lows from the T07 secreview: the watchdog can fire after waitUntilExit returns but before cancel, giving a false "Update timed out" (T08 did not fix it: cancel-after-waitUntilExit still leaves the window); createFile then FileHandle(forWritingTo:) on update.log follows a symlink swapped in between; SystemProcess is @unchecked Sendable.
 - No SIGKILL backstop: if brew ignores both SIGINT and SIGTERM, waitUntilExit blocks forever and isUpdating stays true until the app restarts (pre-existing; T08 moves it 60 s later).
+- After the next release (v0.1.3+), run the T09 manual check: debug build with `upgradeTimeout = 5`, click Install Update from a Cellar install, read ~/Library/Logs/SnapClip/update.log for brew's interrupt/cleanup output, and confirm `brew list --versions snapclip` prints one version.
 
 ## Log
 - 2026-10-08: Plan created at HEAD c7705e0.
@@ -262,3 +263,4 @@ Required mitigations per workstream
 - 2026-10-08: T06 done. Removed the unreachable "Update installed" fileExists branch in finishUpgrade; the version check now leads straight to relaunch. (#7)
 - 2026-10-08: T07 done. The Homebrew upgrade runner moved into SnapClipCore.UpgradeRunner behind UpgradeProcess/UpgradeProcessLauncher; its five failure paths (brew missing, log not creatable, update fails, upgrade fails, timeout) have fake-launcher tests. Still SIGTERM on timeout. (#8)
 - 2026-10-08: T08 done. On timeout the runner sends SIGINT, then SIGTERM after an injected grace (60 s in UpdateController) only if the process is still running; two fake-process tests lock the order [interrupt, terminate] and [interrupt]. (#9)
+- 2026-10-09: T09 skipped by owner: no release newer than 0.1.2 exists, so the real brew signal check was not run. The gap is recorded in tasks/lessons.md and the Backlog.
