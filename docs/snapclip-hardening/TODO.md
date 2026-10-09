@@ -248,6 +248,7 @@ Required mitigations per workstream
 - Pre-existing upgrade-runner Lows from the T07 secreview: the watchdog can fire after waitUntilExit returns but before cancel, giving a false "Update timed out" (T08 did not fix it: cancel-after-waitUntilExit still leaves the window); createFile then FileHandle(forWritingTo:) on update.log follows a symlink swapped in between; SystemProcess is @unchecked Sendable.
 - No SIGKILL backstop: if brew ignores both SIGINT and SIGTERM, waitUntilExit blocks forever and isUpdating stays true until the app restarts (pre-existing; T08 moves it 60 s later).
 - After the next release (v0.1.3+), run the T09 manual check: debug build with `upgradeTimeout = 5`, click Install Update from a Cellar install, read ~/Library/Logs/SnapClip/update.log for brew's interrupt/cleanup output, and confirm `brew list --versions snapclip` prints one version.
+- TZZ is marked done when the landing PR is opened, as the coordinator specified; its "approved by the owner" condition is satisfied only when the owner merges the landing PR into main (codex review of #11, medium-uncertain).
 
 ## Log
 - 2026-10-08: Plan created at HEAD c7705e0.
