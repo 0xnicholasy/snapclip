@@ -8,19 +8,8 @@ final class UpdateController {
     private static let logURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/SnapClip/update.log")
 
-    private enum UpgradeOutcome: Sendable {
-        case success
-        case failed(String)
-    }
-
     private nonisolated static let upgradeTimeout: TimeInterval = 15 * 60
-
-    private final class TimeoutFlag: @unchecked Sendable {
-        private let lock = NSLock()
-        private var value = false
-        var isSet: Bool { lock.withLock { value } }
-        func set() { lock.withLock { value = true } }
-    }
+    private nonisolated static let upgradeInterruptGrace: TimeInterval = 60
 
     private let defaults = UserDefaults.standard
     private let checker: UpdateChecker
@@ -161,7 +150,7 @@ final class UpdateController {
             let outcome = await withCheckedContinuation {
                 (continuation: CheckedContinuation<UpgradeOutcome, Never>) in
                 DispatchQueue.global(qos: .utility).async {
-                    continuation.resume(returning: Self.runUpgrade(homebrew, logURL: logURL))
+                    continuation.resume(returning: UpgradeRunner.run(homebrew, logURL: logURL, timeout: Self.upgradeTimeout, grace: Self.upgradeInterruptGrace))
                 }
             }
             isUpdating = false
@@ -172,63 +161,11 @@ final class UpdateController {
         }
     }
 
-    /// Runs `brew update --quiet` then `brew upgrade snapclip`, logging to `logURL` (overwritten).
-    private nonisolated static func runUpgrade(_ homebrew: HomebrewInstall, logURL: URL) -> UpgradeOutcome {
-        let fm = FileManager.default
-        do {
-            try fm.createDirectory(
-                at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            guard fm.isExecutableFile(atPath: homebrew.brewPath) else {
-                return .failed("Homebrew was not found at \(homebrew.brewPath)")
-            }
-            guard fm.createFile(atPath: logURL.path, contents: nil) else {
-                return .failed("Could not create \(logURL.path)")
-            }
-            let log = try FileHandle(forWritingTo: logURL)
-            defer { try? log.close() }
-            let steps = [["update", "--quiet"], ["upgrade", "snapclip"]]
-            for arguments in steps {
-                try log.write(contentsOf: Data("$ brew \(arguments.joined(separator: " "))\n".utf8))
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: homebrew.brewPath)
-                process.arguments = arguments
-                process.environment = homebrew.environment
-                process.standardInput = FileHandle.nullDevice
-                process.standardOutput = log
-                process.standardError = log
-                try process.run()
-                let timedOut = TimeoutFlag()
-                let watchdog = DispatchWorkItem {
-                    timedOut.set()
-                    process.terminate()
-                }
-                DispatchQueue.global().asyncAfter(deadline: .now() + Self.upgradeTimeout, execute: watchdog)
-                process.waitUntilExit()
-                watchdog.cancel()
-                if timedOut.isSet { return .failed("Update timed out") }
-                if process.terminationStatus != 0 {
-                    return .failed("brew \(arguments[0]) exited with status \(process.terminationStatus)")
-                }
-            }
-            return .success
-        } catch {
-            return .failed(error.localizedDescription)
-        }
-    }
-
     private func finishUpgrade(_ release: ReleaseInfo, _ homebrew: HomebrewInstall) {
         let plist = URL(fileURLWithPath: homebrew.stableAppPath).appendingPathComponent("Contents/Info.plist")
         let installed = NSDictionary(contentsOf: plist)?["CFBundleShortVersionString"] as? String
         guard installed == release.version.description else {
             presentFailure("Homebrew hasn't published SnapClip \(release.version) yet. Try again later.")
-            return
-        }
-        guard FileManager.default.fileExists(atPath: homebrew.stableAppPath) else {
-            let alert = NSAlert()
-            alert.messageText = "Update installed"
-            alert.informativeText = "Quit and reopen SnapClip."
-            alert.addButton(withTitle: "OK")
-            present(alert)
             return
         }
         relaunch(from: homebrew.stableAppPath)

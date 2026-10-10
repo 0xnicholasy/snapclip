@@ -1,13 +1,11 @@
 import CoreServices
 import Foundation
+import SnapClipCore
 
 /// File-level FSEvents watcher. Callbacks are delivered on the main queue.
 @MainActor
 final class FolderWatcher {
-    struct Event {
-        let path: String
-        let flags: FSEventStreamEventFlags
-    }
+    typealias Event = ScreenshotPipeline.Event
 
     // Only touched on the main actor, plus deinit where this object has a single owner.
     private nonisolated(unsafe) var stream: FSEventStreamRef?
@@ -31,7 +29,7 @@ final class FolderWatcher {
             let list = unsafeBitCast(paths, to: CFArray.self) as? [String] ?? []
             var events: [Event] = []
             for index in 0..<min(count, list.count) {
-                events.append(Event(path: list[index], flags: eventFlags[index]))
+                events.append(Event(path: list[index], flags: .init(rawValue: eventFlags[index])))
             }
             MainActor.assumeIsolated { watcher.handler(events) }
         }

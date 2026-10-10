@@ -171,6 +171,18 @@ private func setScreenCaptureXattr(_ path: String) throws {
         #expect(!accepts(f, renamed, seen: f.store.seenIdentities))
     }
 
+    @Test func markedSeenFileIsNotTrackedAfterRename() throws {
+        let f = try Fixture()
+        let path = try f.makeFile("shot.png")
+        try setScreenCaptureXattr(path)
+        #expect(accepts(f, path), "an eligible screenshot is accepted before it is marked")
+        f.store.markSeen(try #require(FileIdentity.at(path: path)))
+        let renamed = f.dir.appendingPathComponent("kept.png").path
+        try FileManager.default.moveItem(atPath: path, toPath: renamed)
+        #expect(!accepts(f, renamed, seen: f.store.seenIdentities))
+        #expect(f.store.items.isEmpty)
+    }
+
     @Test func seenFileMovedIntoFolderIsNotTrackedAgain() throws {
         let f = try Fixture()
         let elsewhere = f.dir.appendingPathComponent("elsewhere", isDirectory: true)
@@ -210,6 +222,15 @@ private func setScreenCaptureXattr(_ path: String) throws {
             trash: { _ in })
         #expect(reloaded.items.map(\.path) == [path])
         #expect(reloaded.seenIdentities == [identity])
+
+        let markedPath = try f.makeFile("b.png")
+        let marked = try #require(FileIdentity.at(path: markedPath))
+        f.store.markSeen(marked)
+        let reloadedAgain = TrackerStore(
+            storeURL: f.dir.appendingPathComponent("state/tracked.json"), now: { f.clock.now },
+            trash: { _ in })
+        #expect(reloadedAgain.seenIdentities == [identity, marked])
+        #expect(reloadedAgain.items.map(\.path) == [path])
     }
 
     @Test func legacyArrayFormatStillDecodes() throws {
@@ -235,6 +256,56 @@ private func setScreenCaptureXattr(_ path: String) throws {
         try FileManager.default.removeItem(at: url)
         f.store.sweep()
         #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    private func sidecars(in dir: URL) throws -> [URL] {
+        try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("tracked.json.unreadable-") }
+    }
+
+    @Test func unreadableStoreIsPreservedOnceBeforeFirstSave() throws {
+        let f = try Fixture()
+        let stateDir = f.dir.appendingPathComponent("state")
+        try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+        let url = stateDir.appendingPathComponent("tracked.json")
+        let garbage = Data("not json {{{".utf8)
+        try garbage.write(to: url)
+        let store = TrackerStore(storeURL: url, now: { f.clock.now }, trash: { _ in })
+        #expect(store.loadFailed)
+        #expect(store.items.isEmpty)
+        #expect(store.seenIdentities.isEmpty)
+
+        store.add(path: try f.makeFile("a.png"))
+        let found = try sidecars(in: stateDir)
+        #expect(found.count == 1)
+        #expect(try Data(contentsOf: #require(found.first)) == garbage)
+        let reloaded = TrackerStore(storeURL: url, now: { f.clock.now }, trash: { _ in })
+        #expect(reloaded.items.count == 1)
+
+        f.clock.advance(5)
+        store.add(path: try f.makeFile("b.png"))
+        #expect(try sidecars(in: stateDir).count == 1)
+    }
+
+    @Test func freshStoreCreatesNoSidecar() throws {
+        let f = try Fixture()
+        #expect(!f.store.loadFailed)
+        f.store.add(path: try f.makeFile("a.png"))
+        #expect(try sidecars(in: f.dir.appendingPathComponent("state")).isEmpty)
+    }
+
+    @Test func permissionDeniedStoreIsNotRenamed() throws {
+        let f = try Fixture()
+        let stateDir = f.dir.appendingPathComponent("state")
+        try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+        let url = stateDir.appendingPathComponent("tracked.json")
+        try Data("{}".utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path) }
+        let store = TrackerStore(storeURL: url, now: { f.clock.now }, trash: { _ in })
+        #expect(!store.loadFailed)
+        store.add(path: try f.makeFile("a.png"))
+        #expect(try sidecars(in: stateDir).isEmpty)
     }
 }
 
@@ -341,6 +412,7 @@ private func setScreenCaptureXattr(_ path: String) throws {
         #expect(UpdateSchedule.delayUntilNextCheck(lastCheck: nil, now: now) == 5)
         #expect(UpdateSchedule.delayUntilNextCheck(lastCheck: now.addingTimeInterval(-3_600), now: now) == 82_800)
         #expect(UpdateSchedule.delayUntilNextCheck(lastCheck: now.addingTimeInterval(-90_000), now: now) == 5)
+        #expect(UpdateSchedule.delayUntilNextCheck(lastCheck: now.addingTimeInterval(864_000), now: now) == SnapClipConstants.updateCheckInterval)
     }
 }
 
@@ -381,5 +453,310 @@ private func setScreenCaptureXattr(_ path: String) throws {
         #expect(env["DYLD_INSERT_LIBRARIES"] == nil)
         #expect(env["PATH"] == "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin")
         #expect(env["HOMEBREW_NO_AUTO_UPDATE"] == "1")
+    }
+}
+
+@Suite struct UpgradeRunnerTests {
+    private final class FakeProcess: UpgradeProcess, @unchecked Sendable {
+        enum Behavior { case exits(Int32), ignoresInterrupt, exitsOnInterrupt }
+        enum Signal: Equatable { case interrupt, terminate }
+        private let behavior: Behavior
+        private let lock = NSLock()
+        private let exited = DispatchSemaphore(value: 0)
+        private var status: Int32 = 0
+        private var running = true
+        private var received: [Signal] = []
+        init(_ behavior: Behavior) { self.behavior = behavior }
+
+        /// Signals in the order the runner sent them.
+        var signals: [Signal] { lock.withLock { received } }
+        var isRunning: Bool { lock.withLock { running } }
+        var terminationStatus: Int32 { lock.withLock { status } }
+        func run() throws {}
+        func waitUntilExit() {
+            if case .exits(let code) = behavior {
+                lock.withLock { status = code; running = false }
+                return
+            }
+            // Bounded so a runner that never escalates fails the test instead of hanging it.
+            _ = exited.wait(timeout: .now() + 5)
+            // The process has exited but waitUntilExit returns late, past the grace period, so only an
+            // isRunning check keeps the runner's delayed terminate from signalling an exited process.
+            if case .exitsOnInterrupt = behavior { Thread.sleep(forTimeInterval: 0.3) }
+        }
+        func interrupt() {
+            lock.withLock { received.append(.interrupt) }
+            if case .exitsOnInterrupt = behavior { finish(status: 130) }
+        }
+        func terminate() {
+            lock.withLock { received.append(.terminate) }
+            finish(status: 15)
+        }
+        private func finish(status newStatus: Int32) {
+            lock.withLock { status = newStatus; running = false }
+            exited.signal()
+        }
+    }
+
+    private final class FakeLauncher: UpgradeProcessLauncher, @unchecked Sendable {
+        private let lock = NSLock()
+        private var behaviors: [FakeProcess.Behavior]
+        private var launchedArguments: [[String]] = []
+        private var launchedProcesses: [FakeProcess] = []
+        init(_ behaviors: [FakeProcess.Behavior]) { self.behaviors = behaviors }
+
+        var launches: [[String]] { lock.withLock { launchedArguments } }
+        var processes: [FakeProcess] { lock.withLock { launchedProcesses } }
+
+        func makeProcess(
+            executable: URL, arguments: [String], environment: [String: String], log: FileHandle
+        ) -> UpgradeProcess {
+            lock.withLock {
+                let process = FakeProcess(behaviors.isEmpty ? .exits(0) : behaviors.removeFirst())
+                launchedArguments.append(arguments)
+                launchedProcesses.append(process)
+                return process
+            }
+        }
+    }
+
+    private func install() throws -> HomebrewInstall {
+        try #require(HomebrewInstall(bundlePath: "/opt/homebrew/Cellar/snapclip/0.1.1/SnapClip.app"))
+    }
+
+    private func tempDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("snapclip-upgrade-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test func missingBrewFailsBeforeLaunching() throws {
+        let dir = try tempDir()
+        let launcher = FakeLauncher([])
+        let outcome = UpgradeRunner.run(
+            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 5, grace: 5,
+            launcher: launcher, isExecutable: { _ in false })
+        #expect(outcome == .failed("Homebrew was not found at /opt/homebrew/bin/brew"))
+        #expect(launcher.launches.isEmpty)
+    }
+
+    @Test func unwritableLogDirectoryFailsBeforeLaunching() throws {
+        let dir = try tempDir()
+        let logURL = dir.appendingPathComponent("update.log")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path) }
+        let launcher = FakeLauncher([])
+        let outcome = UpgradeRunner.run(
+            try install(), logURL: logURL, timeout: 5, grace: 5, launcher: launcher, isExecutable: { _ in true })
+        #expect(outcome == .failed("Could not create \(logURL.path)"))
+        #expect(launcher.launches.isEmpty)
+    }
+
+    @Test func failedUpdateSkipsUpgrade() throws {
+        let dir = try tempDir()
+        let launcher = FakeLauncher([.exits(1)])
+        let outcome = UpgradeRunner.run(
+            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 5, grace: 5,
+            launcher: launcher, isExecutable: { _ in true })
+        #expect(outcome == .failed("brew update exited with status 1"))
+        #expect(launcher.launches == [["update", "--quiet"]])
+    }
+
+    @Test func failedUpgradeReportsItsStatus() throws {
+        let dir = try tempDir()
+        let launcher = FakeLauncher([.exits(0), .exits(1)])
+        let logURL = dir.appendingPathComponent("update.log")
+        let outcome = UpgradeRunner.run(
+            try install(), logURL: logURL, timeout: 5, grace: 5,
+            launcher: launcher, isExecutable: { _ in true })
+        #expect(outcome == .failed("brew upgrade exited with status 1"))
+        #expect(launcher.launches == [["update", "--quiet"], ["upgrade", "snapclip"]])
+        let log = try String(contentsOf: logURL, encoding: .utf8)
+        #expect(log == "$ brew update --quiet\n$ brew upgrade snapclip\n")
+    }
+
+    @Test func brewIgnoringInterruptIsTerminatedAfterGrace() throws {
+        let dir = try tempDir()
+        let launcher = FakeLauncher([.ignoresInterrupt])
+        let outcome = UpgradeRunner.run(
+            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 0.05, grace: 0.05,
+            launcher: launcher, isExecutable: { _ in true })
+        #expect(outcome == .failed("Update timed out"))
+        #expect(launcher.processes.first?.signals == [.interrupt, .terminate])
+    }
+
+    @Test func brewExitingOnInterruptIsNotTerminated() throws {
+        let dir = try tempDir()
+        let launcher = FakeLauncher([.exitsOnInterrupt])
+        let outcome = UpgradeRunner.run(
+            try install(), logURL: dir.appendingPathComponent("update.log"), timeout: 0.05, grace: 0.1,
+            launcher: launcher, isExecutable: { _ in true })
+        #expect(outcome == .failed("Update timed out"))
+        #expect(launcher.processes.first?.signals == [.interrupt])
+    }
+}
+
+@MainActor
+@Suite struct ScreenshotPipelineTests {
+    @MainActor private final class Probe {
+        var copies: [URL] = []
+        var listed: [URL] = []
+        var copyResult = true
+        var gates: [CheckedContinuation<Void, Never>] = []
+        var identityOverride: FileIdentity?
+        var stable = true
+        /// Runs inside the injected wait, after the pipeline has started waiting.
+        var onWait: (@MainActor () -> Void)?
+
+        /// Waits (bounded) until `count` waits are suspended, then resumes every registered gate.
+        func openGates(expecting count: Int = 1) async throws {
+            var attempts = 0
+            while gates.count < count, attempts < 1_000 {
+                attempts += 1
+                await Task.yield()
+            }
+            defer { gates.forEach { $0.resume() } }
+            try #require(gates.count >= count, "expected \(count) suspended wait(s), saw \(gates.count)")
+        }
+    }
+
+    private func makePipeline(_ f: Fixture, _ probe: Probe, names: [String] = [], gated: Bool = false)
+        -> ScreenshotPipeline
+    {
+        ScreenshotPipeline(
+            store: f.store, watchedFolder: f.dir,
+            waitUntilStable: { _ in
+                probe.onWait?()
+                if gated { await withCheckedContinuation { probe.gates.append($0) } }
+                return probe.stable
+            },
+            copy: { probe.copies.append($0); return probe.copyResult },
+            listFolder: { probe.listed.append($0); return names },
+            identityOf: { probe.identityOverride ?? FileIdentity.at(path: $0) },
+            now: Date.init)
+    }
+
+    private func screenshot(_ f: Fixture, _ name: String) throws -> String {
+        let path = try f.makeFile(name)
+        try setScreenCaptureXattr(path)
+        return path
+    }
+
+    private func created(_ path: String) -> ScreenshotPipeline.Event {
+        .init(path: path, flags: [.itemIsFile, .itemCreated])
+    }
+
+    @Test func failedCopyIsNotTracked() async throws {
+        let f = try Fixture()
+        let probe = Probe()
+        probe.copyResult = false
+        let pipeline = makePipeline(f, probe)
+        let path = try screenshot(f, "shot.png")
+        for task in pipeline.handle([created(path)]) { await task.value }
+        #expect(probe.copies.count == 1)
+        #expect(!f.store.isTracked(path: path))
+    }
+
+    @Test func droppedEventsRescanTheWatchedFolder() async throws {
+        for flag: ScreenshotPipeline.EventFlags in [.mustScanSubDirs, .kernelDropped] {
+            let f = try Fixture()
+            let probe = Probe()
+            let path = try screenshot(f, "shot.png")
+            let pipeline = makePipeline(f, probe, names: ["shot.png"])
+            for task in pipeline.handle([.init(path: f.dir.path, flags: flag)]) { await task.value }
+            #expect(probe.listed == [f.dir])
+            #expect(f.store.isTracked(path: path))
+        }
+    }
+
+    @Test func duplicateEventWhileInFlightCopiesOnce() async throws {
+        let f = try Fixture()
+        let probe = Probe()
+        let pipeline = makePipeline(f, probe, gated: true)
+        let path = try screenshot(f, "shot.png")
+        let first = pipeline.handle([created(path)])
+        let second = pipeline.handle([created(path)])
+        try #require(first.count == 1)
+        try #require(second.isEmpty)
+        try await probe.openGates()
+        for task in first + second { await task.value }
+        #expect(probe.copies.count == 1)
+    }
+
+    @Test func identityChangeDuringWaitIsNotAdded() async throws {
+        let f = try Fixture()
+        let probe = Probe()
+        let pipeline = makePipeline(f, probe, gated: true)
+        let path = try screenshot(f, "shot.png")
+        let original = try #require(FileIdentity.at(path: path))
+        probe.onWait = { probe.identityOverride = FileIdentity(inode: 1, device: 1) }
+        let tasks = pipeline.handle([created(path)])
+        try #require(tasks.count == 1)
+        try await probe.openGates()
+        for task in tasks { await task.value }
+        #expect(probe.copies.isEmpty)
+        #expect(!f.store.isTracked(path: path))
+        #expect(f.store.seenIdentities.contains(original))
+    }
+
+    @Test func renameDuringWaitMarksSeenAndLaterEventIsIgnored() async throws {
+        let f = try Fixture()
+        let probe = Probe()
+        let pipeline = makePipeline(f, probe, gated: true)
+        let path = try screenshot(f, "shot.png")
+        let original = try #require(FileIdentity.at(path: path))
+        let renamed = f.dir.appendingPathComponent("renamed.png").path
+        probe.onWait = { try? FileManager.default.moveItem(atPath: path, toPath: renamed) }
+        let tasks = pipeline.handle([created(path)])
+        try #require(tasks.count == 1)
+        try await probe.openGates()
+        for task in tasks { await task.value }
+        #expect(probe.copies.isEmpty)
+        #expect(!f.store.isTracked(path: path))
+        #expect(!f.store.isTracked(path: renamed))
+        #expect(f.store.seenIdentities.contains(original))
+        probe.onWait = nil
+        probe.gates.removeAll()
+        let later = pipeline.handle([created(renamed)])
+        #expect(later.isEmpty)
+        if !later.isEmpty { try await probe.openGates() }
+        for task in later { await task.value }
+        #expect(probe.copies.isEmpty)
+        #expect(!f.store.isTracked(path: renamed))
+    }
+
+    @Test func timeoutDoesNotMarkSeenAndRetryCopies() async throws {
+        let f = try Fixture()
+        let probe = Probe()
+        var waits = 0
+        let pipeline = ScreenshotPipeline(
+            store: f.store, watchedFolder: f.dir,
+            waitUntilStable: { _ in waits += 1; return waits > 1 },
+            copy: { probe.copies.append($0); return true })
+        let path = try screenshot(f, "shot.png")
+        let original = try #require(FileIdentity.at(path: path))
+        for task in pipeline.handle([created(path)]) { await task.value }
+        #expect(probe.copies.isEmpty)
+        #expect(!f.store.seenIdentities.contains(original))
+        for task in pipeline.handle([created(path)]) { await task.value }
+        #expect(probe.copies.count == 1)
+        #expect(f.store.isTracked(path: path))
+    }
+
+    @Test func timeoutWithRenameStillMarksSeen() async throws {
+        let f = try Fixture()
+        let probe = Probe()
+        probe.stable = false
+        let pipeline = makePipeline(f, probe)
+        let path = try screenshot(f, "shot.png")
+        let original = try #require(FileIdentity.at(path: path))
+        let renamed = f.dir.appendingPathComponent("renamed.png").path
+        probe.onWait = { try? FileManager.default.moveItem(atPath: path, toPath: renamed) }
+        for task in pipeline.handle([created(path)]) { await task.value }
+        #expect(probe.copies.isEmpty)
+        #expect(!f.store.isTracked(path: path))
+        #expect(!f.store.isTracked(path: renamed))
+        #expect(f.store.seenIdentities.contains(original))
     }
 }
