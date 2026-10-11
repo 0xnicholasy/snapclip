@@ -17,7 +17,9 @@ macOS saves screenshots to the Desktop, so it fills up, and you must paste or dr
 - Keeps at most 5 tracked screenshots; a 6th moves the oldest to the Trash.
 - Moves each tracked screenshot to the Trash 5 minutes after it appeared.
 - Never touches a file you moved or renamed.
-- Menu bar list with time left per screenshot, a Copy action for each, Instant Copy, Start at Login, Open Screenshot Folder, Check for Updates, Quit.
+- Optional custom global shortcut (none by default) that starts an interactive area capture; Space switches to window mode, Esc cancels. The file lands in your screenshot folder and is copied like any other. Cmd+Shift+3, 4 and 5 are left to macOS.
+- Optional floating capture button (Show Capture Button) that does the same capture on click; drag it anywhere.
+- Menu bar list with time left per screenshot, a Copy action for each, Instant Copy, Take Screenshot, Capture Shortcut, Show Capture Button, Start at Login, Open Screenshot Folder, Check for Updates, Quit.
 
 ## Install
 
@@ -28,6 +30,20 @@ open /Applications/SnapClip.app
 ```
 
 First run: macOS asks whether SnapClip may access your Desktop folder (or whichever folder holds your screenshots). Allow it, or screenshots cannot be detected.
+
+## Custom shortcut and capture button
+
+1. Click the SnapClip menu bar icon and choose **Capture Shortcut...**.
+2. Press the key combination you want (it needs Cmd, Ctrl or Opt), then click **Save**. **Clear Shortcut** removes it; **Cancel** or Esc keeps the old one.
+3. Press the shortcut anywhere to drag-select an area. Press Space to capture a window instead, or Esc to cancel.
+
+Turn on **Show Capture Button** in the menu for a floating button that does the same capture on click. Drag it to move it; SnapClip remembers where you left it. The button hides while you select.
+
+Cmd+Shift+3, 4 and 5 are reserved for macOS and cannot be recorded. If another app already uses your shortcut, SnapClip shows an alert and keeps your previous one.
+
+## Screen Recording permission
+
+The first time SnapClip captures with its own shortcut or button, macOS asks for Screen Recording permission. Allow it in System Settings > Privacy & Security > Screen & System Audio Recording. Captures made with Cmd+Shift+3, 4 or 5 do not need it. After allowing it, quit and reopen SnapClip.
 
 ## Updating
 

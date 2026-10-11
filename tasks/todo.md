@@ -33,3 +33,13 @@ Finish line: `brew install 0xnicholasy/tap/snapclip` installs a working app on t
   - MEDIUM: symlinked screenshot folder; single pasteboard item; FSEvents rescan flags; trash/TCC notes.
 - [ ] Public repo + tag v0.1.0
 - [ ] Tap formula + `brew install` verified
+
+## Feature: custom capture shortcut + floating capture button (2026-10-11)
+
+Finish line: `swift test` passes; `scripts/build-app.sh` builds; user can record a shortcut in the app, the shortcut runs an area capture into the screenshot folder (auto-copied by the existing pipeline), and a toggleable floating button does the same.
+
+Decision (user, 2026-10-11): SnapClip registers its own global hotkey (Carbon RegisterEventHotKey) and runs `/usr/sbin/screencapture -i <folder>/<name>.png`. macOS Cmd+Shift+3/4/5 untouched. No hotkey set by default.
+
+- [x] Core: CaptureHotkey model + validation + UserDefaults store; capture output path builder (tests)
+- [x] App: HotkeyManager (Carbon), recorder window, floating button panel, menu items, README
+- [x] Verify: swift test (55 pass), build-app.sh, code review (1 MEDIUM + 3 LOW fixed). Live hotkey/button test pending user.

@@ -16,6 +16,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         store: store, watchedFolder: ScreenshotLocation.resolve(),
         copy: { [unowned self] in self.copyToClipboard(url: $0) })
     private let updates = UpdateController()
+    private let hotkeyStore = CaptureHotkeyStore()
+    private let hotkeys = HotkeyManager()
+    private var recorder: HotkeyRecorder?
+    private var buttonPanel: CaptureButtonPanel?
+    private lazy var captureController = CaptureController(
+        folder: { [unowned self] in self.pipeline.watchedFolder },
+        onRunningChanged: { [weak self] running in self?.captureRunningChanged(running) })
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -43,6 +50,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         promptInstantCopyOnFirstLaunch()
         updates.start()
+        setUpCapture()
+    }
+
+    private func setUpCapture() {
+        hotkeys.onPress = { [weak self] in self?.captureController.capture() }
+        if let hotkey = hotkeyStore.load(), !hotkeys.register(hotkey) {
+            showRegistrationFailure(for: hotkey)
+        }
+        if hotkeyStore.showCaptureButton { showCaptureButton() }
+    }
+
+    private func showCaptureButton() {
+        let panel = buttonPanel ?? CaptureButtonPanel { [weak self] in self?.captureController.capture() }
+        buttonPanel = panel
+        panel.show()
+    }
+
+    /// Hides the floating button while `screencapture` runs so it is not in the shot.
+    private func captureRunningChanged(_ running: Bool) {
+        if running {
+            buttonPanel?.hide()
+        } else if hotkeyStore.showCaptureButton {
+            showCaptureButton()
+        }
+    }
+
+    private func showRegistrationFailure(for hotkey: CaptureHotkey) {
+        let alert = NSAlert()
+        alert.messageText = "Shortcut could not be registered"
+        alert.informativeText =
+            "\(hotkey.displayString) may already be used by another app. Choose a different shortcut "
+            + "with Capture Shortcut... in the SnapClip menu."
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     private func promptInstantCopyOnFirstLaunch() {
@@ -67,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         watcher?.stop()
+        hotkeys.stop()
     }
 
     // MARK: - Detection
@@ -135,6 +177,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         instant.state = captureSettings.isInstantCopyEnabled ? .on : .off
         menu.addItem(instant)
 
+        let hotkey = hotkeyStore.load()
+        let shotTitle = hotkey.map { "Take Screenshot  (\($0.displayString))" } ?? "Take Screenshot"
+        let shot = NSMenuItem(title: shotTitle, action: #selector(takeScreenshot), keyEquivalent: "")
+        shot.target = self
+        menu.addItem(shot)
+
+        let shortcut = NSMenuItem(
+            title: "Capture Shortcut...", action: #selector(openRecorder), keyEquivalent: "")
+        shortcut.target = self
+        menu.addItem(shortcut)
+
+        let button = NSMenuItem(
+            title: "Show Capture Button", action: #selector(toggleCaptureButton(_:)), keyEquivalent: "")
+        button.target = self
+        button.state = hotkeyStore.showCaptureButton ? .on : .off
+        menu.addItem(button)
+
         if desktopSettings.iconsHidden {
             menu.addItem(.separator())
             let info = NSMenuItem(
@@ -183,6 +242,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleInstantCopy(_ sender: NSMenuItem) {
         captureSettings.setInstantCopy(!captureSettings.isInstantCopyEnabled)
+    }
+
+    @objc private func takeScreenshot() {
+        // The menu is still closing; give it a moment so it is not captured.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.captureController.capture()
+        }
+    }
+
+    @objc private func toggleCaptureButton(_ sender: NSMenuItem) {
+        let enabled = !hotkeyStore.showCaptureButton
+        hotkeyStore.showCaptureButton = enabled
+        if enabled {
+            showCaptureButton()
+        } else {
+            buttonPanel?.hide()
+        }
+    }
+
+    @objc private func openRecorder() {
+        if let recorder {
+            recorder.bringToFront()
+            return
+        }
+        // Free the active hotkey so pressing it records instead of capturing.
+        hotkeys.unregister()
+        let previous = hotkeyStore.load()
+        let recorder = HotkeyRecorder(
+            current: previous,
+            onSave: { [weak self] hotkey in self?.hotkeyStore.save(hotkey) },
+            onClear: { [weak self] in self?.hotkeyStore.clear() },
+            onClose: { [weak self] in self?.recorderClosed(previous: previous) })
+        self.recorder = recorder
+        recorder.show()
+    }
+
+    private func recorderClosed(previous: CaptureHotkey?) {
+        recorder = nil
+        guard let hotkey = hotkeyStore.load() else { return }
+        if hotkeys.register(hotkey) { return }
+        // Keep only a shortcut that is actually registered: roll back to the previous one.
+        if hotkey != previous {
+            if let previous {
+                hotkeyStore.save(previous)
+                hotkeys.register(previous)
+            } else {
+                hotkeyStore.clear()
+            }
+        }
+        // This runs inside windowWillClose; show the modal alert after the close finishes.
+        DispatchQueue.main.async { [weak self] in self?.showRegistrationFailure(for: hotkey) }
     }
 
     @objc private func openDesktopSettings() {
