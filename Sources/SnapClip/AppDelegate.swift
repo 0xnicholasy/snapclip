@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var aboutWindow: AboutWindow?
     /// Screenshots kept this session, newest first. They stay listed in the widget until dismissed.
     private var keptInWidget: [TrackedScreenshot] = []
+    private static let maxWidgetRows = SnapClipConstants.maxTracked + 3
     private lazy var captureController = CaptureController(
         folder: { [unowned self] in self.pipeline.watchedFolder },
         onRunningChanged: { [weak self] running in self?.captureRunningChanged(running) })
@@ -47,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         watcher = folderWatcher
 
         store.sweep()
-        sweepTimer = Timer.scheduledTimer(
+        let sweep = Timer.scheduledTimer(
             withTimeInterval: SnapClipConstants.sweepInterval, repeats: true
         ) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -55,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if self?.widget?.isVisible == true { self?.widget?.refresh() }
             }
         }
+        sweepTimer = sweep
 
         promptInstantCopyOnFirstLaunch()
         updates.start()
@@ -80,8 +82,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Pending items newest first, then kept ones. Kept items whose file moved or changed are dropped.
     private func widgetEntries() -> [WidgetEntry] {
         keptInWidget.removeAll { FileIdentity.at(path: $0.path) != $0.identity }
-        return store.items.sorted { $0.addedAt > $1.addedAt }.map { WidgetEntry(item: $0, kept: false) }
-            + keptInWidget.map { WidgetEntry(item: $0, kept: true) }
+        let pending = store.items
+            .filter { FileIdentity.at(path: $0.path) == $0.identity }
+            .sorted { $0.addedAt > $1.addedAt }
+        let keptRoom = max(0, Self.maxWidgetRows - pending.count)
+        return pending.map { WidgetEntry(item: $0, kept: false) }
+            + keptInWidget.prefix(keptRoom).map { WidgetEntry(item: $0, kept: true) }
     }
 
     private func dismissKept(path: String) {
@@ -100,8 +106,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func trashNow(path: String) {
-        store.trashNow(path: path)
+        let moved = store.trashNow(path: path)
         if widget?.isVisible == true { widget?.refresh() }
+        guard !moved else { return }
+        NSSound.beep()
+        let alert = NSAlert()
+        alert.messageText = "Could not move to Trash"
+        alert.informativeText =
+            "\(URL(fileURLWithPath: path).lastPathComponent)\nThe file is still in your screenshot folder and is no longer auto-cleaned."
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     private func setUpCapture() {
@@ -194,6 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func openInPreview(path: String) {
+        if store.items.contains(where: { $0.path == path }) { keep(path: path) }
         let url = URL(fileURLWithPath: path)
         guard
             let previewURL = NSWorkspace.shared.urlForApplication(
@@ -233,7 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             copy.representedObject = tracked.path
             sub.addItem(copy)
             let preview = NSMenuItem(
-                title: "Open in Preview", action: #selector(previewItem(_:)), keyEquivalent: "")
+                title: "Open in Preview (keeps it)", action: #selector(previewItem(_:)), keyEquivalent: "")
             preview.target = self
             preview.representedObject = tracked.path
             sub.addItem(preview)

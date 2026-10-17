@@ -1,4 +1,5 @@
 import AppKit
+import SnapClipCore
 
 /// NSWindow that closes on Esc.
 private final class EscClosableWindow: NSWindow {
@@ -61,7 +62,8 @@ final class AboutWindow: NSObject {
         }
 
         let tagline = label(
-            "Copies screenshots to the clipboard and tidies them up after 5 minutes.",
+            "Copies screenshots to the clipboard and tidies them up after "
+                + "\(Int(SnapClipConstants.maxAge / 60)) minutes.",
             font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
         tagline.alignment = .center
         tagline.maximumNumberOfLines = 0
@@ -72,8 +74,8 @@ final class AboutWindow: NSObject {
         stack.setCustomSpacing(18, after: tagline)
         let rows = NSStackView(views: [
             hintRow(symbol: "cursorarrow.click", text: "Click a row to copy"),
-            hintRow(symbol: "eye", text: "Open in Preview"),
-            hintRow(symbol: "pin", text: "Keep forever"),
+            hintRow(symbol: "eye", text: "Open in Preview (keeps it)"),
+            hintRow(symbol: "pin", text: "Keep (never trash)"),
             hintRow(symbol: "trash", text: "Move to Trash now"),
         ])
         rows.orientation = .vertical

@@ -45,7 +45,11 @@ final class DesktopWidgetPanel {
     private let headerCount = NSTextField(labelWithString: "")
     private var rows: [String: WidgetRowView] = [:]
     private var listed: [WidgetEntry]?
+    private var listedPending = 0
     private var thumbnails: [String: CGImage] = [:]
+    private var decoding: Set<String> = []
+    private var failedDecodes: [String: Int] = [:]
+    private static let maxDecodeAttempts = 3
     private var timer: Timer?
 
     init(
@@ -158,9 +162,11 @@ final class DesktopWidgetPanel {
         refresh()
         panel.invalidateShadow()
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        let tick = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         }
+        RunLoop.main.add(tick, forMode: .common)
+        timer = tick
     }
 
     func hide() {
@@ -172,14 +178,25 @@ final class DesktopWidgetPanel {
     /// Rebuilds the rows when the list changed, otherwise only updates the countdowns.
     func refresh() {
         let now = Date()
-        let current = entries()
-        if current != listed {
-            rebuild(current)
+        let all = entries()
+        let current = Array(all.prefix(maxRows()))
+        let pending = all.filter { !$0.kept }.count
+        if current != listed || pending != listedPending {
+            rebuild(current, pending: pending)
         }
         for entry in current where !entry.kept {
             rows[entry.item.path]?.update(
                 remaining: max(0, SnapClipConstants.maxAge - now.timeIntervalSince(entry.item.addedAt)))
         }
+        loadMissingThumbnails(for: current)
+    }
+
+    private func maxRows() -> Int {
+        guard let visible = (panel.screen ?? NSScreen.main)?.visibleFrame else { return Int.max }
+        let available = visible.height - 48
+        var count = 1
+        while Self.height(forRows: count + 1) <= available { count += 1 }
+        return count
     }
 
     private static func height(forRows count: Int) -> CGFloat {
@@ -187,15 +204,16 @@ final class DesktopWidgetPanel {
         return headerHeight + CGFloat(count) * rowHeight + CGFloat(count - 1) * rowSpacing + bottomPadding
     }
 
-    private func rebuild(_ current: [WidgetEntry]) {
+    private func rebuild(_ current: [WidgetEntry], pending: Int) {
+        let previous = Dictionary(
+            (listed ?? []).map { ($0.item.path, $0) }, uniquingKeysWith: { first, _ in first })
         listed = current
-        for row in rows.values { row.removeFromSuperview() }
-        rows = [:]
+        listedPending = pending
         let paths = Set(current.map(\.item.path))
         thumbnails = thumbnails.filter { paths.contains($0.key) }
+        failedDecodes = failedDecodes.filter { paths.contains($0.key) }
 
         let band = current.isEmpty ? Self.emptyHeight : Self.headerHeight
-        let pending = current.filter { !$0.kept }.count
         headerCount.stringValue = pending == 0 ? "Nothing to clean" : "\(pending) to clean"
         headerTitle.sizeToFit()
         headerCount.sizeToFit()
@@ -208,23 +226,47 @@ final class DesktopWidgetPanel {
             height: countHeight)
         aboutButton.frame = NSRect(x: Self.width - 12 - 18, y: (band - 18) / 2, width: 18, height: 18)
 
+        var next: [String: WidgetRowView] = [:]
         for (index, entry) in current.enumerated() {
+            let path = entry.item.path
             let frame = NSRect(
                 x: 0, y: Self.headerHeight + CGFloat(index) * (Self.rowHeight + Self.rowSpacing),
                 width: Self.width, height: Self.rowHeight)
+            if let row = rows[path], previous[path] == entry {
+                row.frame = frame
+                next[path] = row
+                continue
+            }
+            rows[path]?.removeFromSuperview()
             let row = WidgetRowView(
-                frame: frame, path: entry.item.path, kept: entry.kept,
-                thumbnail: thumbnail(for: entry.item.path), onCopy: onCopy, onPreview: onPreview,
+                frame: frame, path: path, kept: entry.kept,
+                thumbnail: thumbnails[path], onCopy: onCopy, onPreview: onPreview,
                 onKeep: onKeep, onTrash: onTrash, onDismiss: onDismiss)
             content.addSubview(row)
-            rows[entry.item.path] = row
+            next[path] = row
         }
-        resize(toRows: current.count)
+        for (path, row) in rows where next[path] == nil { row.removeFromSuperview() }
+        rows = next
+        let target = resize(toRows: current.count)
+        reseedHover(in: target)
+    }
+
+    private func reseedHover(in frame: NSRect) {
+        let mouse = NSEvent.mouseLocation
+        let topmost =
+            NSWindow.windowNumber(at: mouse, belowWindowWithWindowNumber: 0) == panel.windowNumber
+        let inside = topmost && frame.contains(mouse)
+        let point = NSPoint(x: mouse.x - frame.minX, y: frame.maxY - mouse.y)
+        for row in rows.values { row.setHovered(inside && row.frame.contains(point)) }
     }
 
     /// Resizes keeping the top edge fixed; animates only while the panel is on screen.
-    private func resize(toRows count: Int) {
-        let height = Self.height(forRows: count)
+    @discardableResult
+    private func resize(toRows count: Int) -> NSRect {
+        var height = Self.height(forRows: count)
+        if let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
+            height = min(height, visible.height - 48)
+        }
         var frame = panel.frame
         frame.origin.y += frame.height - height
         frame.size = NSSize(width: Self.width, height: height)
@@ -237,20 +279,40 @@ final class DesktopWidgetPanel {
         panel.setFrame(frame, display: true, animate: animated)
         panel.invalidateShadow()
         if panel.isVisible { saveTopLeft() }
+        return frame
     }
 
-    private func thumbnail(for path: String) -> CGImage? {
-        if let cached = thumbnails[path] { return cached }
+    private func loadMissingThumbnails(for current: [WidgetEntry]) {
+        for entry in current {
+            let path = entry.item.path
+            guard thumbnails[path] == nil, !decoding.contains(path),
+                failedDecodes[path, default: 0] < Self.maxDecodeAttempts
+            else { continue }
+            decoding.insert(path)
+            Task.detached(priority: .utility) { [weak self] in
+                let image = Self.decodeThumbnail(path: path)
+                await MainActor.run { self?.thumbnailDecoded(path: path, image: image) }
+            }
+        }
+    }
+
+    private func thumbnailDecoded(path: String, image: CGImage?) {
+        decoding.remove(path)
+        if image == nil { failedDecodes[path, default: 0] += 1 }
+        guard let image, listed?.contains(where: { $0.item.path == path }) == true else { return }
+        thumbnails[path] = image
+        rows[path]?.setThumbnail(image)
+    }
+
+    private nonisolated static func decodeThumbnail(path: String) -> CGImage? {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: 96,
         ]
-        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
-            let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil)
         else { return nil }
-        thumbnails[path] = cgImage
-        return cgImage
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
     private func positionDefault() {
@@ -368,7 +430,7 @@ private final class WidgetRowView: NSView {
         preview.isBordered = false
         preview.image = NSImage(systemSymbolName: "eye", accessibilityDescription: "Preview")
         preview.contentTintColor = .secondaryLabelColor
-        preview.toolTip = "Open in Preview"
+        preview.toolTip = "Open in Preview (keeps it)"
         preview.target = self
         preview.action = #selector(previewClicked)
         preview.isHidden = true
@@ -490,27 +552,45 @@ private final class WidgetRowView: NSView {
         guard onCopy(path) else { return }
         isCopied = true
         copiedTimer?.invalidate()
-        copiedTimer = Timer.scheduledTimer(withTimeInterval: Self.copiedDuration, repeats: false) {
+        let flash = Timer.scheduledTimer(withTimeInterval: Self.copiedDuration, repeats: false) {
             [weak self] _ in
             MainActor.assumeIsolated { self?.endCopied() }
         }
+        RunLoop.main.add(flash, forMode: .common)
+        copiedTimer = flash
         render()
     }
 
     @objc private func previewClicked() {
-        onPreview(path)
+        let path = self.path
+        let callback = onPreview
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { callback(path) }
+        }
     }
 
     @objc private func keepClicked() {
-        onKeep(path)
+        let path = self.path
+        let callback = onKeep
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { callback(path) }
+        }
     }
 
     @objc private func trashClicked() {
-        onTrash(path)
+        let path = self.path
+        let callback = onTrash
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { callback(path) }
+        }
     }
 
     @objc private func dismissClicked() {
-        onDismiss(path)
+        let path = self.path
+        let callback = onDismiss
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { callback(path) }
+        }
     }
 
     private func endCopied() {
@@ -519,13 +599,17 @@ private final class WidgetRowView: NSView {
         render()
     }
 
-    private func setHovered(_ hovered: Bool) {
+    func setHovered(_ hovered: Bool) {
         isHovered = hovered
         previewButton.isHidden = !hovered
         keepButton.isHidden = !hovered || kept
         trashButton.isHidden = !hovered || kept
         dismissButton.isHidden = !hovered || !kept
         applyColors()
+    }
+
+    func setThumbnail(_ image: CGImage) {
+        thumbView.layer?.contents = image
     }
 
     func update(remaining: TimeInterval) {
