@@ -140,7 +140,9 @@ final class UpdateController {
         guard !isUpdating else { return }
         // Resolve symlinks so /Applications/SnapClip.app maps back to the Cellar path.
         let bundlePath = URL(fileURLWithPath: Bundle.main.bundlePath).resolvingSymlinksInPath().path
-        guard let homebrew = HomebrewInstall(bundlePath: bundlePath) else {
+        // A source build (or any non-Cellar bundle) upgrades the installed Homebrew copy and
+        // relaunches from it (finishUpgrade uses homebrew.stableAppPath).
+        guard let homebrew = HomebrewInstall(bundlePath: bundlePath) ?? HomebrewInstall.installed() else {
             NSWorkspace.shared.open(release.pageURL)
             return
         }

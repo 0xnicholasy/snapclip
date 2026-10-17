@@ -25,6 +25,28 @@ public struct HomebrewInstall: Equatable, Sendable {
         self.prefix = prefix
     }
 
+    /// Builds an install for a known prefix. Rejects anything outside `allowedPrefixes`, so the
+    /// derived `brew` path is never executed from an untrusted location.
+    public init?(prefix: String) {
+        guard Self.allowedPrefixes.contains(prefix) else { return nil }
+        self.prefix = prefix
+    }
+
+    /// Finds a Homebrew copy of SnapClip regardless of where the running bundle lives (e.g. a
+    /// source build). Checks the standard prefixes in a fixed order and requires both `brew` and
+    /// the installed app to exist.
+    public static func installed(
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> HomebrewInstall? {
+        for prefix in ["/opt/homebrew", "/usr/local"] {
+            guard let candidate = HomebrewInstall(prefix: prefix) else { continue }
+            if fileExists(candidate.brewPath) && fileExists(candidate.stableAppPath) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
     public var brewPath: String { prefix + "/bin/brew" }
 
     /// Path that survives `brew upgrade`; relaunch from here.

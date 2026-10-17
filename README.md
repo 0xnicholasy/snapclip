@@ -54,7 +54,8 @@ SnapClip checks GitHub for a newer release 5 seconds after launch and then every
 
 - **Check for Updates...** in the menu checks right away and tells you whether you are up to date.
 - **Install Update** runs `brew update` and `brew upgrade snapclip` (building from source takes about a minute), then relaunches the new version. Output goes to `~/Library/Logs/SnapClip/update.log`; if the update fails, the alert shows the end of that log.
-- If SnapClip was not installed by Homebrew (for example a build from source), **Install Update** opens the release page instead.
+- If SnapClip was not installed by Homebrew (for example a build from source) and no Homebrew copy is installed, **Install Update** opens the release page instead.
+- If you run a build from source while a Homebrew copy is installed, Install Update upgrades the Homebrew copy and relaunches it from there.
 
 To update by hand: `brew upgrade snapclip`.
 

@@ -475,6 +475,27 @@ private func setScreenCaptureXattr(_ path: String) throws {
         #expect(HomebrewInstall(bundlePath: "/usr/local/Cellar/snapclip/0.1.1/SnapClip.app") != nil)
     }
 
+    @Test func installedPrefersOptHomebrewWhenBrewAndAppExist() {
+        let present: Set<String> = [
+            "/opt/homebrew/bin/brew", "/opt/homebrew/opt/snapclip/SnapClip.app",
+            "/usr/local/bin/brew", "/usr/local/opt/snapclip/SnapClip.app",
+        ]
+        #expect(HomebrewInstall.installed(fileExists: { present.contains($0) })?.prefix == "/opt/homebrew")
+    }
+
+    @Test func installedFallsBackToUsrLocalWhenOnlyItHasBoth() {
+        let present: Set<String> = [
+            "/opt/homebrew/bin/brew", "/usr/local/bin/brew", "/usr/local/opt/snapclip/SnapClip.app",
+        ]
+        #expect(HomebrewInstall.installed(fileExists: { present.contains($0) })?.prefix == "/usr/local")
+    }
+
+    @Test func installedIsNilWhenBrewExistsButAppDoesNot() {
+        let present: Set<String> = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
+        #expect(HomebrewInstall.installed(fileExists: { present.contains($0) }) == nil)
+        #expect(HomebrewInstall(prefix: "/tmp/evil") == nil)
+    }
+
     @Test func environmentPassesThroughOnlyAllowlistedVariables() throws {
         let install = try #require(HomebrewInstall(bundlePath: "/opt/homebrew/Cellar/snapclip/0.1.1/SnapClip.app"))
         let env = install.environment(inheriting: [
