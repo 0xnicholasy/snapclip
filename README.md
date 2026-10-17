@@ -10,6 +10,8 @@ macOS saves screenshots to the Desktop, so it fills up, and you must paste or dr
 
 ![SnapClip menu showing tracked screenshots with time left](assets/preview.png)
 
+![SnapClip desktop widget listing a screenshot with time left before it is trashed](assets/widget.png)
+
 ## Features
 
 - Copies each new screenshot (Cmd+Shift+3, 4 or 5) to the clipboard as an image and file URL.
@@ -19,7 +21,8 @@ macOS saves screenshots to the Desktop, so it fills up, and you must paste or dr
 - Never touches a file you moved or renamed.
 - Optional custom global shortcut (none by default) that starts an interactive area capture; Space switches to window mode, Esc cancels. The file lands in your screenshot folder and is copied like any other. Cmd+Shift+3, 4 and 5 are left to macOS.
 - Optional floating capture button (Show Capture Button) that does the same capture on click; drag it anywhere.
-- Menu bar list with time left per screenshot, a Copy action for each, Instant Copy, Take Screenshot, Capture Shortcut, Show Capture Button, Start at Login, Open Screenshot Folder, Check for Updates, Quit.
+- Optional desktop widget (Show Desktop Widget) pinned to the desktop behind your windows. It lists pending screenshots with a thumbnail and time left; click one to copy it, or hover and press the eye button to open it in Preview, Keep, or the trash button to move it to the Trash now. Keep marks the row as kept (no countdown) until you remove it with the x or quit SnapClip (kept rows are cleared on quit; the file itself stays kept); kept files are never trashed. The info button in its header opens About. With nothing listed it collapses to its header.
+- Menu bar list with time left per screenshot, Copy, Open in Preview, Keep and Move to Trash actions for each, Instant Copy, Take Screenshot, Capture Shortcut, Show Capture Button, Start at Login, Open Screenshot Folder, Check for Updates, About SnapClip, Quit.
 
 ## Install
 
@@ -82,6 +85,8 @@ open build/SnapClip.app
 - Tracking: each screenshot is stored in `~/Library/Application Support/SnapClip/tracked.json` with its path, inode, device and time added.
 - Still in place: a file is only SnapClip's to delete while a file at the original path has the same inode and device. If it was moved, renamed or replaced, SnapClip stops tracking it and never touches it.
 - Sweep: every 10 seconds and after each new screenshot: drop files no longer in place, trash files tracked for 300 seconds or more, then trash the oldest while more than 5 are tracked. Trashing uses `FileManager.trashItem`, so files are recoverable.
+- Keep: stops tracking the file and never trashes it. Its identity stays in `seen`, so it is never tracked again. In the widget, kept rows are cleared when SnapClip quits (the file itself stays kept).
+- Move to Trash: trashes a tracked file immediately (recoverable from the Trash).
 - Start at Login: writes `~/Library/LaunchAgents/io.github.0xnicholasy.snapclip.plist` (runs `/usr/bin/open -a <app>` at login). Under Homebrew the path is rewritten to `<prefix>/opt/snapclip/...` so upgrades keep working. The toggle is checked when the plist exists; changes apply at next login.
 
 ## License

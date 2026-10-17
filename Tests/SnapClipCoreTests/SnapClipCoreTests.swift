@@ -67,6 +67,40 @@ private func setScreenCaptureXattr(_ path: String) throws {
         #expect(f.store.items.isEmpty)
     }
 
+    @Test func keptFileIsNeverTrashedOrTrackedAgain() throws {
+        let f = try Fixture()
+        let path = try f.makeFile("a.png")
+        f.store.add(path: path)
+        let identity = try #require(FileIdentity.at(path: path))
+        // Evict the identity from `seen` so only keep() can put it back.
+        for n in 0..<SnapClipConstants.maxSeen {
+            f.store.markSeen(FileIdentity(inode: UInt64.max - UInt64(n), device: UInt64.max))
+        }
+        #expect(!f.store.seenIdentities.contains(identity))
+        f.store.keep(path: path)
+        #expect(f.store.items.isEmpty)
+        f.clock.advance(400)
+        f.store.sweep()
+        #expect(f.trashed.urls.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: path))
+        #expect(f.store.seenIdentities.contains(identity))
+        let reloaded = TrackerStore(storeURL: f.dir.appendingPathComponent("state/tracked.json"))
+        #expect(reloaded.items.isEmpty)
+        #expect(reloaded.seenIdentities.contains(identity))
+    }
+
+    @Test func trashNowTrashesImmediatelyAndPersists() throws {
+        let f = try Fixture()
+        let path = try f.makeFile("a.png")
+        f.store.add(path: path)
+        #expect(f.store.trashNow(path: path))
+        #expect(f.trashed.urls.map(\.path) == [path])
+        #expect(f.store.items.isEmpty)
+        let reloaded = TrackerStore(storeURL: f.dir.appendingPathComponent("state/tracked.json"))
+        #expect(reloaded.items.isEmpty)
+        #expect(!f.store.trashNow(path: path))
+    }
+
     @Test func movedFileIsNotTrashedAndIsUntracked() throws {
         let f = try Fixture()
         let path = try f.makeFile("a.png")

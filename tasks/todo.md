@@ -43,3 +43,13 @@ Decision (user, 2026-10-11): SnapClip registers its own global hotkey (Carbon Re
 - [x] Core: CaptureHotkey model + validation + UserDefaults store; capture output path builder (tests)
 - [x] App: HotkeyManager (Carbon), recorder window, floating button panel, menu items, README
 - [x] Verify: swift test (55 pass), build-app.sh, code review (1 MEDIUM + 3 LOW fixed). Live hotkey/button test pending user.
+
+## Feature: desktop widget for pending screenshots (2026-10-16)
+
+Finish line: `swift test` passes; `scripts/build-app.sh` builds; "Show Desktop Widget" shows a desktop-level panel listing tracked screenshots (thumbnail, name, time left), click copies, Keep stops auto-trash.
+
+Decision (user, 2026-10-16): in-app NSPanel at desktop-icon level + 1 (behind windows), not WidgetKit (needs Developer ID + .appex). Include Keep action (untrack, identity stays in seen).
+
+- [x] Core: `TrackerStore.keep(path:)` + regression test
+- [x] App: DesktopWidgetPanel, menu toggle + Keep submenu item, README
+- [x] Verify: swift test (56 pass), build-app.sh, code review (2 MEDIUM + 4 LOW fixed). Live GUI check pending user.

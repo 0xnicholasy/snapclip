@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let captureSettings = ScreenCaptureSettings()
     private let desktopSettings = DesktopSettings()
     private static let promptedKey = "didPromptInstantCopy"
+    private static let widgetKey = "showDesktopWidget"
     private var statusItem: NSStatusItem?
     private var watcher: FolderWatcher?
     private var sweepTimer: Timer?
@@ -20,6 +21,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let hotkeys = HotkeyManager()
     private var recorder: HotkeyRecorder?
     private var buttonPanel: CaptureButtonPanel?
+    private var widget: DesktopWidgetPanel?
+    private var aboutWindow: AboutWindow?
+    /// Screenshots kept this session, newest first. They stay listed in the widget until dismissed.
+    private var keptInWidget: [TrackedScreenshot] = []
     private lazy var captureController = CaptureController(
         folder: { [unowned self] in self.pipeline.watchedFolder },
         onRunningChanged: { [weak self] running in self?.captureRunningChanged(running) })
@@ -45,12 +50,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sweepTimer = Timer.scheduledTimer(
             withTimeInterval: SnapClipConstants.sweepInterval, repeats: true
         ) { [weak self] _ in
-            MainActor.assumeIsolated { _ = self?.store.sweep() }
+            MainActor.assumeIsolated {
+                _ = self?.store.sweep()
+                if self?.widget?.isVisible == true { self?.widget?.refresh() }
+            }
         }
 
         promptInstantCopyOnFirstLaunch()
         updates.start()
         setUpCapture()
+        if UserDefaults.standard.bool(forKey: Self.widgetKey) { showWidget() }
+    }
+
+    private func showWidget() {
+        let panel =
+            widget
+            ?? DesktopWidgetPanel(
+                entries: { [unowned self] in self.widgetEntries() },
+                onCopy: { [unowned self] in self.copyToClipboard(url: URL(fileURLWithPath: $0)) },
+                onPreview: { [unowned self] in self.openInPreview(path: $0) },
+                onKeep: { [unowned self] in self.keep(path: $0) },
+                onTrash: { [unowned self] in self.trashNow(path: $0) },
+                onDismiss: { [unowned self] in self.dismissKept(path: $0) },
+                onAbout: { [unowned self] in self.showAbout() })
+        widget = panel
+        panel.show()
+    }
+
+    /// Pending items newest first, then kept ones. Kept items whose file moved or changed are dropped.
+    private func widgetEntries() -> [WidgetEntry] {
+        keptInWidget.removeAll { FileIdentity.at(path: $0.path) != $0.identity }
+        return store.items.sorted { $0.addedAt > $1.addedAt }.map { WidgetEntry(item: $0, kept: false) }
+            + keptInWidget.map { WidgetEntry(item: $0, kept: true) }
+    }
+
+    private func dismissKept(path: String) {
+        keptInWidget.removeAll { $0.path == path }
+        if widget?.isVisible == true { widget?.refresh() }
+    }
+
+    private func keep(path: String) {
+        if let item = store.items.first(where: { $0.path == path }) {
+            keptInWidget.removeAll { $0.path == path }
+            keptInWidget.insert(item, at: 0)
+            keptInWidget = Array(keptInWidget.prefix(SnapClipConstants.maxTracked))
+        }
+        store.keep(path: path)
+        if widget?.isVisible == true { widget?.refresh() }
+    }
+
+    private func trashNow(path: String) {
+        store.trashNow(path: path)
+        if widget?.isVisible == true { widget?.refresh() }
     }
 
     private func setUpCapture() {
@@ -74,6 +125,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if hotkeyStore.showCaptureButton {
             showCaptureButton()
         }
+    }
+
+    @objc private func aboutItem() { showAbout() }
+
+    private func showAbout() {
+        let window = aboutWindow ?? AboutWindow()
+        aboutWindow = window
+        window.show()
     }
 
     private func showRegistrationFailure(for hotkey: CaptureHotkey) {
@@ -134,6 +193,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return pasteboard.writeObjects([item])
     }
 
+    private func openInPreview(path: String) {
+        let url = URL(fileURLWithPath: path)
+        guard
+            let previewURL = NSWorkspace.shared.urlForApplication(
+                withBundleIdentifier: "com.apple.Preview")
+        else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        NSWorkspace.shared.open([url], withApplicationAt: previewURL, configuration: config)
+    }
+
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         store.sweep()
@@ -159,6 +232,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             copy.target = self
             copy.representedObject = tracked.path
             sub.addItem(copy)
+            let preview = NSMenuItem(
+                title: "Open in Preview", action: #selector(previewItem(_:)), keyEquivalent: "")
+            preview.target = self
+            preview.representedObject = tracked.path
+            sub.addItem(preview)
+            let keep = NSMenuItem(title: "Keep", action: #selector(keepItem(_:)), keyEquivalent: "")
+            keep.target = self
+            keep.representedObject = tracked.path
+            sub.addItem(keep)
+            let trashNow = NSMenuItem(
+                title: "Move to Trash", action: #selector(trashNowItem(_:)), keyEquivalent: "")
+            trashNow.target = self
+            trashNow.representedObject = tracked.path
+            sub.addItem(trashNow)
             entry.submenu = sub
             menu.addItem(entry)
         }
@@ -194,6 +281,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         button.state = hotkeyStore.showCaptureButton ? .on : .off
         menu.addItem(button)
 
+        let widgetItem = NSMenuItem(
+            title: "Show Desktop Widget", action: #selector(toggleWidget(_:)), keyEquivalent: "")
+        widgetItem.target = self
+        widgetItem.state = UserDefaults.standard.bool(forKey: Self.widgetKey) ? .on : .off
+        menu.addItem(widgetItem)
+
         if desktopSettings.iconsHidden {
             menu.addItem(.separator())
             let info = NSMenuItem(
@@ -214,6 +307,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(updates.makeCheckItem())
 
         menu.addItem(.separator())
+        let about = NSMenuItem(title: "About SnapClip", action: #selector(aboutItem), keyEquivalent: "")
+        about.target = self
+        menu.addItem(about)
         menu.addItem(
             NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
@@ -226,6 +322,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func copyItem(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String else { return }
         copyToClipboard(url: URL(fileURLWithPath: path))
+    }
+
+    @objc private func previewItem(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        openInPreview(path: path)
+    }
+
+    @objc private func keepItem(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        keep(path: path)
+    }
+
+    @objc private func trashNowItem(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        trashNow(path: path)
+    }
+
+    @objc private func toggleWidget(_ sender: NSMenuItem) {
+        let enabled = !UserDefaults.standard.bool(forKey: Self.widgetKey)
+        UserDefaults.standard.set(enabled, forKey: Self.widgetKey)
+        if enabled {
+            showWidget()
+        } else {
+            widget?.hide()
+        }
     }
 
     @objc private func toggleLogin(_ sender: NSMenuItem) {

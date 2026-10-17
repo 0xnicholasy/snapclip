@@ -86,6 +86,26 @@ public final class TrackerStore {
         save()
     }
 
+    /// Stop tracking the item at `path` without touching the file, so it is never trashed.
+    /// Its identity stays in `seen`, so it is not tracked again. No-op if not tracked.
+    public func keep(path: String) {
+        guard let item = items.first(where: { $0.path == path }) else { return }
+        items.removeAll { $0.path == path }
+        recordSeen(item.identity)
+        save()
+    }
+
+    /// Trash the item at `path` immediately and stop tracking it; its identity stays in `seen`.
+    /// Returns true only if the trash call succeeded. No-op returning false if not tracked.
+    @discardableResult
+    public func trashNow(path: String) -> Bool {
+        guard let item = items.first(where: { $0.path == path }) else { return false }
+        var trashed: [URL] = []
+        trashItem(item, into: &trashed)
+        save()
+        return !trashed.isEmpty
+    }
+
     /// Append `identity` to `seen` if absent and cap the list at `maxSeen`, dropping the oldest.
     private func recordSeen(_ identity: FileIdentity) {
         guard !seen.contains(identity) else { return }
